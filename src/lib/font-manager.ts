@@ -9,11 +9,10 @@ export interface FontEntry {
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 export const BUNDLED_FONTS = [
-  { name: "Helvetiker", url: `${BASE_PATH}/fonts/helvetiker_regular.typeface.json` },
-  { name: "Helvetiker Bold", url: `${BASE_PATH}/fonts/helvetiker_bold.typeface.json` },
+  { name: "Nunito", url: `${BASE_PATH}/fonts/nunito_regular.typeface.json` },
+  { name: "Nunito Bold", url: `${BASE_PATH}/fonts/nunito_bold.typeface.json` },
   { name: "Droid Serif", url: `${BASE_PATH}/fonts/droid_serif_regular.typeface.json` },
   { name: "Droid Serif Bold", url: `${BASE_PATH}/fonts/droid_serif_bold.typeface.json` },
-  { name: "Optimer", url: `${BASE_PATH}/fonts/optimer_regular.typeface.json` },
 ];
 
 const fontCache = new Map<string, Font>();
@@ -55,6 +54,8 @@ export async function loadCustomFont(file: File): Promise<FontEntry> {
 
 function convertOpentypeToTypeface(otFont: opentype.Font): Record<string, unknown> {
   const resolution = 1000;
+  const scale = resolution / otFont.unitsPerEm;
+  const s = (v: number) => +(v * scale).toFixed(2);
   const glyphs: Record<string, unknown> = {};
 
   for (let i = 0; i < otFont.glyphs.length; i++) {
@@ -62,22 +63,28 @@ function convertOpentypeToTypeface(otFont: opentype.Font): Record<string, unknow
     if (!glyph.unicode) continue;
 
     const char = String.fromCodePoint(glyph.unicode);
-    const path = glyph.getPath(0, 0, resolution);
     let o = "";
+    let curX = 0, curY = 0;
 
-    for (const cmd of path.commands) {
+    for (const cmd of glyph.path.commands) {
       switch (cmd.type) {
         case "M":
-          o += `m ${cmd.x} ${cmd.y} `;
+          o += `m ${s(cmd.x)} ${s(cmd.y)} `;
+          curX = cmd.x; curY = cmd.y;
           break;
         case "L":
-          o += `l ${cmd.x} ${cmd.y} `;
+          if (Math.abs(cmd.x - curX) > 0.1 || Math.abs(cmd.y - curY) > 0.1) {
+            o += `l ${s(cmd.x)} ${s(cmd.y)} `;
+          }
+          curX = cmd.x; curY = cmd.y;
           break;
         case "Q":
-          o += `q ${cmd.x1} ${cmd.y1} ${cmd.x} ${cmd.y} `;
+          o += `q ${s(cmd.x)} ${s(cmd.y)} ${s(cmd.x1)} ${s(cmd.y1)} `;
+          curX = cmd.x; curY = cmd.y;
           break;
         case "C":
-          o += `b ${cmd.x1} ${cmd.y1} ${cmd.x2} ${cmd.y2} ${cmd.x} ${cmd.y} `;
+          o += `b ${s(cmd.x)} ${s(cmd.y)} ${s(cmd.x1)} ${s(cmd.y1)} ${s(cmd.x2)} ${s(cmd.y2)} `;
+          curX = cmd.x; curY = cmd.y;
           break;
         case "Z":
           break;
@@ -86,9 +93,9 @@ function convertOpentypeToTypeface(otFont: opentype.Font): Record<string, unknow
 
     const bb = glyph.getBoundingBox();
     glyphs[char] = {
-      ha: Math.round((glyph.advanceWidth ?? 0) * (resolution / otFont.unitsPerEm)),
-      x_min: Math.round(bb.x1),
-      x_max: Math.round(bb.x2),
+      ha: s((glyph.advanceWidth ?? 0)),
+      x_min: s(bb.x1),
+      x_max: s(bb.x2),
       o: o.trim(),
     };
   }

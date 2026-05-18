@@ -24,7 +24,7 @@ export default function TextEditor({
   texts, availableFonts, stampWidth, stampHeight, onChange, onFontLoaded,
 }: Props) {
   const fontInputRef = useRef<HTMLInputElement>(null);
-  const defaultFont = availableFonts[0] || "Helvetiker";
+  const defaultFont = availableFonts[0] || "Nunito";
   const [presetInput, setPresetInput] = useState<{ type: LayoutPreset; value: string } | null>(null);
 
   function addText() {
