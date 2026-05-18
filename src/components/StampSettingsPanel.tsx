@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   type DesignMode,
   type StampSettings,
@@ -14,8 +13,6 @@ interface Props {
 }
 
 export default function StampSettingsPanel({ settings, onChange }: Props) {
-  const [showAdvancedThread, setShowAdvancedThread] = useState(false);
-
   function update(partial: Partial<StampSettings>) {
     onChange({ ...settings, ...partial });
   }
@@ -81,7 +78,7 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
 
       <div className="border-t pt-4">
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700">Handle Mount</label>
+          <label className="text-sm font-medium text-gray-700">Handle Mount (M10×1.5)</label>
           <button
             onClick={() => update({ threadEnabled: !settings.threadEnabled })}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -97,28 +94,10 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
         {settings.threadEnabled && (
           <div className="mt-3 space-y-3">
             <SliderInput label="Tolerance" unit="mm" value={settings.threadConfig.tolerance}
-              min={0} max={1.5} step={0.1}
+              min={0} max={1.5} step={0.05}
               onChange={(v) => updateThread({ tolerance: v })} />
-
-            <button
-              onClick={() => setShowAdvancedThread(!showAdvancedThread)}
-              className="text-xs text-gray-500 hover:text-gray-700"
-            >
-              {showAdvancedThread ? "Hide" : "Show"} advanced thread settings
-            </button>
-
-            {showAdvancedThread && (
-              <div className="space-y-2 border-l-2 border-gray-200 pl-3">
-                <SliderInput label="Outer Diameter" unit="mm" value={settings.threadConfig.outerDiameter}
-                  min={6} max={30} step={0.5} onChange={(v) => updateThread({ outerDiameter: v })} />
-                <SliderInput label="Inner Diameter" unit="mm" value={settings.threadConfig.innerDiameter}
-                  min={4} max={25} step={0.5} onChange={(v) => updateThread({ innerDiameter: v })} />
-                <SliderInput label="Pitch" unit="mm" value={settings.threadConfig.pitch}
-                  min={1} max={8} step={0.5} onChange={(v) => updateThread({ pitch: v })} />
-                <SliderInput label="Thread Height" unit="mm" value={settings.threadConfig.height}
-                  min={4} max={20} step={0.5} onChange={(v) => updateThread({ height: v })} />
-              </div>
-            )}
+            <SliderInput label="Thread Height" unit="mm" value={settings.threadConfig.height}
+              min={4} max={20} step={0.5} onChange={(v) => updateThread({ height: v })} />
           </div>
         )}
       </div>

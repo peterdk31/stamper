@@ -18,7 +18,7 @@ export function createHandle(threadConfig: ThreadConfig): THREE.Group {
 
 export function createHandleBody(config: ThreadConfig): THREE.Group {
   const group = new THREE.Group();
-  const bodyRadius = config.outerDiameter * 1.2;
+  const bodyRadius = config.majorDiameter * 1.2;
   const bodyHeight = 18;
   const chamfer = 3;
   const mat = new THREE.MeshStandardMaterial({ color: HANDLE_COLOR });

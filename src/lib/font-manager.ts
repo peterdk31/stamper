@@ -6,13 +6,15 @@ export interface FontEntry {
   font: Font;
 }
 
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 export const BUNDLED_FONTS = [
-  { name: "Helvetiker", url: "/fonts/helvetiker_regular.typeface.json" },
-  { name: "Helvetiker Bold", url: "/fonts/helvetiker_bold.typeface.json" },
-  { name: "Droid Serif", url: "/fonts/droid_serif_regular.typeface.json" },
-  { name: "Droid Serif Bold", url: "/fonts/droid_serif_bold.typeface.json" },
-  { name: "Optimer", url: "/fonts/optimer_regular.typeface.json" },
-] as const;
+  { name: "Helvetiker", url: `${BASE_PATH}/fonts/helvetiker_regular.typeface.json` },
+  { name: "Helvetiker Bold", url: `${BASE_PATH}/fonts/helvetiker_bold.typeface.json` },
+  { name: "Droid Serif", url: `${BASE_PATH}/fonts/droid_serif_regular.typeface.json` },
+  { name: "Droid Serif Bold", url: `${BASE_PATH}/fonts/droid_serif_bold.typeface.json` },
+  { name: "Optimer", url: `${BASE_PATH}/fonts/optimer_regular.typeface.json` },
+];
 
 const fontCache = new Map<string, Font>();
 

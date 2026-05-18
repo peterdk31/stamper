@@ -1,19 +1,17 @@
 export interface ThreadConfig {
-  outerDiameter: number;  // mm
-  innerDiameter: number;  // mm
-  pitch: number;          // mm per revolution
-  height: number;         // mm — total thread depth in stamp
-  tolerance: number;      // mm — shrinks male thread for clearance
-  segments: number;       // segments per revolution
+  majorDiameter: number;  // mm — nominal size (M10 = 10)
+  pitch: number;          // mm per revolution (M10 coarse = 1.5)
+  height: number;         // mm — threaded engagement length
+  tolerance: number;      // mm — shrinks male thread for FDM clearance
+  segments: number;       // circumferential mesh segments
 }
 
 export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
-  outerDiameter: 12,
-  innerDiameter: 8,
-  pitch: 3,
+  majorDiameter: 10,
+  pitch: 1.5,
   height: 8,
-  tolerance: 0.5,
-  segments: 32,
+  tolerance: 0.4,
+  segments: 48,
 };
 
 export interface StampSettings {
