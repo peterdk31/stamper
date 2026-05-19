@@ -44,14 +44,12 @@ export interface TraceRequest {
   width: number;
   height: number;
   data: Uint8ClampedArray;
-  targetWidth: number;
-  targetHeight: number;
   threshold: number;
 }
 
 export type TraceMessage =
   | { type: "progress"; progress: number; stage: string }
-  | { type: "result"; contours: Point[][] };
+  | { type: "result"; contours: Point[][]; imageWidth: number; imageHeight: number };
 
 type ProgressFn = (progress: number, stage: string) => void;
 
@@ -188,7 +186,7 @@ function marchingSquares(
 }
 
 self.onmessage = (e: MessageEvent<TraceRequest>) => {
-  const { width, height, data, targetWidth, targetHeight, threshold } = e.data;
+  const { width, height, data, threshold } = e.data;
 
   const post = self.postMessage.bind(self);
   let lastReported = -1;
@@ -231,13 +229,11 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     contours = simplified;
   }
 
-  report(0.90, "Scaling…");
+  report(0.90, "Done");
 
-  const scaleX = targetWidth / width;
-  const scaleY = targetHeight / height;
-  const scaledContours = contours.map((contour) =>
-    contour.map((p) => ({ x: p.x * scaleX, y: (height - p.y) * scaleY })),
+  const rawContours = contours.map((contour) =>
+    contour.map((p) => ({ x: p.x, y: height - p.y })),
   );
 
-  post({ type: "result", contours: scaledContours } as TraceMessage);
+  post({ type: "result", contours: rawContours, imageWidth: width, imageHeight: height } as TraceMessage);
 };

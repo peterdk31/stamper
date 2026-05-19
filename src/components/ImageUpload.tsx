@@ -72,7 +72,17 @@ export default function ImageUpload({
             : "border-gray-300 cursor-pointer hover:border-amber-500"
         }`}
       >
-        {isProcessing ? (
+        {imageDataUrl ? (
+          <div className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageDataUrl} alt="Uploaded outline" className="mx-auto max-h-40 object-contain" />
+            {isProcessing && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/70">
+                <div className="h-6 w-6 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
+        ) : isProcessing ? (
           <div className="space-y-3">
             <div className="flex justify-center">
               <div className="h-8 w-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -86,9 +96,6 @@ export default function ImageUpload({
             </div>
             <p className="text-xs text-gray-400">{Math.round(progress * 100)}%</p>
           </div>
-        ) : imageDataUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageDataUrl} alt="Uploaded outline" className="mx-auto max-h-40 object-contain" />
         ) : isSvg ? (
           <p className="text-sm text-gray-700">SVG loaded</p>
         ) : (
@@ -109,14 +116,16 @@ export default function ImageUpload({
         }}
       />
 
-      {hasContent && !isProcessing && (
-        <button
-          onClick={handleClear}
-          className="text-sm text-red-600 hover:text-red-800"
-        >
-          Remove image
-        </button>
-      )}
+      <div className="h-6">
+        {hasContent && !isProcessing && (
+          <button
+            onClick={handleClear}
+            className="text-sm text-red-600 hover:text-red-800"
+          >
+            Remove image
+          </button>
+        )}
+      </div>
     </div>
   );
 }

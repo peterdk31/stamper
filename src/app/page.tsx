@@ -5,10 +5,11 @@ import dynamic from "next/dynamic";
 import * as THREE from "three";
 import { DEFAULT_STAMP_SETTINGS, type StampSettings, type StampText } from "@/types/stamp";
 import { contoursToShapes } from "@/lib/image-trace";
-import type { TraceRequest, TraceMessage } from "@/lib/image-trace.worker";
-import { parseSvgToShapes, getSvgAspectRatio } from "@/lib/svg-parse";
+import type { TraceMessage } from "@/lib/image-trace.worker";
+import { parseRawSvg, scaleRawSvgToStamp, getSvgAspectRatio, type RawSvgData } from "@/lib/svg-parse";
 import { loadAllBundledFonts, getFontCache, type FontEntry } from "@/lib/font-manager";
 import { textEntriesToShapes, computeTextBounds } from "@/lib/text-to-shapes";
+import type { AutoFitResult } from "@/lib/auto-fit.worker";
 import StampSettingsPanel from "@/components/StampSettingsPanel";
 import ImageUpload from "@/components/ImageUpload";
 import TextEditor from "@/components/TextEditor";
@@ -21,7 +22,8 @@ export default function Home() {
   const [imageName, setImageName] = useState<string | null>(null);
   const [svgText, setSvgText] = useState<string | null>(null);
   const [texts, setTexts] = useState<StampText[]>([]);
-  const [designShapes, setDesignShapes] = useState<THREE.Shape[]>([]);
+  const [rawContours, setRawContours] = useState<{ x: number; y: number }[][] | null>(null);
+  const [rawImageDims, setRawImageDims] = useState<{ w: number; h: number } | null>(null);
   const [availableFonts, setAvailableFonts] = useState<string[]>([]);
   const [fontsReady, setFontsReady] = useState(false);
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
@@ -61,13 +63,17 @@ export default function Home() {
     }
 
     if (newHeight === null) return settings.height;
-    return Math.round(Math.max(10, newHeight) * 10) / 10;
-  }, [settings.autoSize, settings.height, settings.width, settings.padding, svgText, imageAspectRatio, texts, fontsReady]);
+    const minHeight = settings.threadEnabled ? Math.max(10, settings.threadConfig.majorDiameter + 4) : 10;
+    return Math.round(Math.max(minHeight, newHeight) * 10) / 10;
+  }, [settings.autoSize, settings.height, settings.width, settings.padding, settings.threadEnabled, settings.threadConfig.majorDiameter, svgText, imageAspectRatio, texts, fontsReady]);
 
   const effectiveSettings = useMemo(() =>
     effectiveHeight !== settings.height ? { ...settings, height: effectiveHeight } : settings,
     [settings, effectiveHeight],
   );
+
+  const [isAutoFitting, setIsAutoFitting] = useState(false);
+  const autoFitWorkerRef = useRef<Worker | null>(null);
 
   const [isTracing, setIsTracing] = useState(false);
   const [traceProgress, setTraceProgress] = useState(0);
@@ -121,21 +127,14 @@ export default function Home() {
     img.src = imageDataUrl;
   }, [imageDataUrl]);
 
-  // Phase 2: Trace contours once pixels and effective settings are stable.
+  // Phase 2: Trace contours in pixel space (no dependency on stamp dimensions).
   useEffect(() => {
-    if (svgText) {
+    if (svgText || !loadedPixels) {
       terminateWorker();
-      setIsTracing(false);
-      const shapes = parseSvgToShapes(svgText, effectiveSettings.width, effectiveSettings.height);
-      setDesignShapes(shapes);
-      return;
-    }
-
-    if (!loadedPixels) {
-      terminateWorker();
-      if (!imageDataUrl) {
+      if (!imageDataUrl && !svgText) {
         setIsTracing(false);
-        setDesignShapes([]);
+        setRawContours(null);
+        setRawImageDims(null);
       }
       return;
     }
@@ -156,7 +155,8 @@ export default function Home() {
         setTraceProgress(msg.progress);
         setTraceStage(msg.stage);
       } else if (msg.type === "result") {
-        setDesignShapes(contoursToShapes(msg.contours));
+        setRawContours(msg.contours);
+        setRawImageDims({ w: msg.imageWidth, h: msg.imageHeight });
         setIsTracing(false);
         terminateWorker();
       }
@@ -167,16 +167,39 @@ export default function Home() {
       terminateWorker();
     };
 
-    const req: TraceRequest = {
+    worker.postMessage({
       width: loadedPixels.width,
       height: loadedPixels.height,
       data: loadedPixels.data,
-      targetWidth: effectiveSettings.width,
-      targetHeight: effectiveSettings.height,
       threshold: 128,
-    };
-    worker.postMessage(req);
-  }, [svgText, loadedPixels, imageDataUrl, effectiveSettings.width, effectiveSettings.height, terminateWorker]);
+    });
+  }, [svgText, loadedPixels, imageDataUrl, terminateWorker]);
+
+  // SVG: parse once, scale is handled in the useMemo below.
+  const rawSvgData = useMemo<RawSvgData | null>(() => {
+    if (!svgText) return null;
+    return parseRawSvg(svgText);
+  }, [svgText]);
+
+  // Scale raw design data to current stamp dimensions (instant, no re-trace).
+  const designShapes = useMemo(() => {
+    if (rawSvgData) {
+      return scaleRawSvgToStamp(rawSvgData, effectiveSettings.width, effectiveSettings.height);
+    }
+    if (rawContours && rawImageDims) {
+      const scale = Math.min(
+        effectiveSettings.width / rawImageDims.w,
+        effectiveSettings.height / rawImageDims.h,
+      );
+      const offsetX = (effectiveSettings.width - rawImageDims.w * scale) / 2;
+      const offsetY = (effectiveSettings.height - rawImageDims.h * scale) / 2;
+      const scaled = rawContours.map((c) =>
+        c.map((p) => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY })),
+      );
+      return contoursToShapes(scaled);
+    }
+    return [];
+  }, [rawSvgData, rawContours, rawImageDims, effectiveSettings.width, effectiveSettings.height]);
 
   const textShapes = useMemo(() => {
     if (!fontsReady) return [];
@@ -223,7 +246,54 @@ export default function Home() {
             onChange={setTexts}
             onFontLoaded={handleFontLoaded}
           />
-          <StampSettingsPanel settings={effectiveSettings} onChange={setSettings} />
+          <StampSettingsPanel settings={effectiveSettings} onChange={setSettings}
+            isAutoFitting={isAutoFitting}
+            onFindMinWidth={designShapes.length > 0 || textShapes.length > 0 ? () => {
+              if (isAutoFitting) return;
+              setIsAutoFitting(true);
+
+              const allShapes = [...designShapes, ...textShapes];
+              const box = new THREE.Box2();
+              for (const s of allShapes) {
+                for (const p of s.getPoints()) box.expandByPoint(p);
+                for (const h of s.holes) for (const p of h.getPoints()) box.expandByPoint(p);
+              }
+              const contentW = box.max.x - box.min.x;
+              const contentH = box.max.y - box.min.y;
+              if (contentW <= 0 || contentH <= 0) { setIsAutoFitting(false); return; }
+
+              const serialized = allShapes.map((s) => ({
+                points: s.getPoints().map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y })),
+                holes: s.holes.map((h) => h.getPoints().map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y }))),
+              }));
+
+              if (autoFitWorkerRef.current) autoFitWorkerRef.current.terminate();
+              const worker = new Worker(new URL("../lib/auto-fit.worker.ts", import.meta.url));
+              autoFitWorkerRef.current = worker;
+
+              worker.onmessage = (e: MessageEvent<AutoFitResult>) => {
+                if (e.data.type === "result") {
+                  const minSize = effectiveSettings.threadEnabled ? Math.max(10, effectiveSettings.threadConfig.majorDiameter + 4) : 10;
+                  setSettings((s) => ({ ...s, width: Math.max(minSize, e.data.width) }));
+                }
+                setIsAutoFitting(false);
+                worker.terminate();
+                autoFitWorkerRef.current = null;
+              };
+              worker.onerror = () => {
+                setIsAutoFitting(false);
+                worker.terminate();
+                autoFitWorkerRef.current = null;
+              };
+
+              worker.postMessage({
+                shapes: serialized,
+                contentW,
+                contentH,
+                nozzleDiameter: effectiveSettings.nozzleDiameter,
+              });
+            } : undefined}
+          />
         </aside>
 
         <section>

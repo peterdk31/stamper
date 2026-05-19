@@ -35,13 +35,11 @@ export default function StampPreview({ settings, designShapes, textShapes, expor
   }, [settings.threadEnabled, settings.threadConfig, settings.width, settings.height]);
 
   const center = useMemo(() => {
-    const stampCenterX = settings.width / 2;
-    const centerZ = (settings.baseThickness + settings.impressionDepth) / 2;
-    if (settings.threadEnabled) {
-      const handleX = settings.width + 15 + settings.threadConfig.majorDiameter * 1.2;
-      return new THREE.Vector3((stampCenterX + handleX) / 2, settings.height / 2, centerZ);
-    }
-    return new THREE.Vector3(stampCenterX, settings.height / 2, centerZ);
+    return new THREE.Vector3(
+      settings.width / 2,
+      settings.height / 2,
+      (settings.baseThickness + settings.impressionDepth) / 2,
+    );
   }, [settings]);
 
   function handleExportStamp() {
@@ -69,6 +67,12 @@ export default function StampPreview({ settings, designShapes, textShapes, expor
           </Canvas>
         </div>
       </div>
+
+      {stampGroup.userData.hasThinFeatures && (
+        <p className="text-sm text-red-600">
+          Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red)
+        </p>
+      )}
 
       <div className="flex justify-end gap-2">
         <button

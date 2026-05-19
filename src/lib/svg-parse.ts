@@ -114,44 +114,49 @@ export function getSvgAspectRatio(svgText: string): number | null {
   return w / h;
 }
 
-export function parseSvgToShapes(
-  svgText: string,
-  targetWidth: number,
-  targetHeight: number,
-): THREE.Shape[] {
+export interface RawSvgData {
+  shapes: THREE.Shape[];
+  box: THREE.Box2;
+}
+
+export function parseRawSvg(svgText: string): RawSvgData | null {
   const loader = new SVGLoader();
   const data = loader.parse(svgText);
   const allShapes: THREE.Shape[] = [];
+  const box = new THREE.Box2();
 
   for (const path of data.paths) {
     if (!isDarkPath(path)) continue;
-    allShapes.push(...shapesFromPath(path));
-  }
-
-  if (allShapes.length === 0) return [];
-
-  const box = new THREE.Box2();
-  for (const shape of allShapes) {
-    const pts = shape.getPoints();
-    for (const p of pts) {
-      box.expandByPoint(p);
+    const pathShapes = shapesFromPath(path);
+    allShapes.push(...pathShapes);
+    for (const shape of pathShapes) {
+      for (const p of shape.getPoints()) box.expandByPoint(p);
     }
   }
 
-  const svgWidth = box.max.x - box.min.x;
-  const svgHeight = box.max.y - box.min.y;
-  if (svgWidth === 0 || svgHeight === 0) return allShapes;
+  if (allShapes.length === 0) return null;
+  return { shapes: allShapes, box };
+}
+
+export function scaleRawSvgToStamp(
+  raw: RawSvgData,
+  targetWidth: number,
+  targetHeight: number,
+): THREE.Shape[] {
+  const svgWidth = raw.box.max.x - raw.box.min.x;
+  const svgHeight = raw.box.max.y - raw.box.min.y;
+  if (svgWidth === 0 || svgHeight === 0) return raw.shapes;
 
   const scale = Math.min(targetWidth / svgWidth, targetHeight / svgHeight);
   const margin = (targetHeight - svgHeight * scale) / 2;
-  const offsetX = -box.min.x * scale + (targetWidth - svgWidth * scale) / 2;
-  const offsetY = box.max.y * scale + margin;
+  const offsetX = -raw.box.min.x * scale + (targetWidth - svgWidth * scale) / 2;
+  const offsetY = raw.box.max.y * scale + margin;
 
   function transformPoints(pts: THREE.Vector2[]): THREE.Vector2[] {
     return pts.map((p) => new THREE.Vector2(p.x * scale + offsetX, -p.y * scale + offsetY));
   }
 
-  return allShapes.map((original) => {
+  return raw.shapes.map((original) => {
     const points = original.getPoints();
     if (points.length === 0) return new THREE.Shape();
 
@@ -165,4 +170,14 @@ export function parseSvgToShapes(
 
     return shape;
   });
+}
+
+export function parseSvgToShapes(
+  svgText: string,
+  targetWidth: number,
+  targetHeight: number,
+): THREE.Shape[] {
+  const raw = parseRawSvg(svgText);
+  if (!raw) return [];
+  return scaleRawSvgToStamp(raw, targetWidth, targetHeight);
 }

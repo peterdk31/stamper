@@ -10,13 +10,17 @@ import SliderInput from "./SliderInput";
 interface Props {
   settings: StampSettings;
   onChange: (settings: StampSettings) => void;
+  isAutoFitting?: boolean;
+  onFindMinWidth?: () => void;
 }
 
-export default function StampSettingsPanel({ settings, onChange }: Props) {
+export default function StampSettingsPanel({ settings, onChange, isAutoFitting, onFindMinWidth }: Props) {
   function update(partial: Partial<StampSettings>) {
     onChange({ ...settings, ...partial });
   }
 
+  const minSize = settings.threadEnabled ? Math.max(10, settings.threadConfig.majorDiameter + 4) : 10;
+  const minBaseThickness = settings.threadEnabled ? Math.max(3, settings.threadConfig.height) : 3;
   const maxThreadHeight = Math.max(settings.baseThickness - 2, 2);
 
   function updateThread(partial: Partial<ThreadConfig>) {
@@ -46,12 +50,30 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
           onChange={(v) => update({ padding: v })} />
       )}
 
-      <SliderInput label="Width" unit="mm" value={settings.width} min={10} max={200} step={1}
-        onChange={(v) => update({ width: v })} />
-      <SliderInput label="Height" unit="mm" value={settings.height} min={10} max={200} step={1}
+      <div>
+        {onFindMinWidth && (
+          <div className="flex items-baseline justify-between mb-1">
+            <div className="flex items-baseline gap-2">
+              <label className="text-sm font-medium text-gray-700">Width</label>
+              <button
+                onClick={onFindMinWidth}
+                disabled={isAutoFitting}
+                title="Find smallest printable width for your nozzle"
+                className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50 font-medium"
+              >
+                {isAutoFitting ? "Computing…" : "Auto-fit"}
+              </button>
+            </div>
+            <span className="text-xs text-gray-500 tabular-nums">{settings.width} mm</span>
+          </div>
+        )}
+        <SliderInput label={onFindMinWidth ? undefined : "Width"} unit="mm" value={settings.width} min={minSize} max={200} step={1}
+          onChange={(v) => update({ width: v })} />
+      </div>
+      <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
         onChange={(v) => update({ height: v, autoSize: false })}
         disabled={settings.autoSize} />
-      <SliderInput label="Base Thickness" unit="mm" value={settings.baseThickness} min={1} max={20} step={0.5}
+      <SliderInput label="Base Thickness" unit="mm" value={settings.baseThickness} min={minBaseThickness} max={20} step={0.5}
         onChange={(v) => {
           const newMax = Math.max(v - 2, 2);
           const clampedThread = Math.min(settings.threadConfig.height, newMax);
@@ -62,6 +84,10 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
       <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
         min={0} max={Math.min(settings.width, settings.height) / 2} step={0.5}
         onChange={(v) => update({ cornerRadius: v })} />
+
+      <SliderInput label="Nozzle Diameter" unit="mm" value={settings.nozzleDiameter}
+        min={0.1} max={1.5} step={0.05}
+        onChange={(v) => update({ nozzleDiameter: v })} />
 
       <div>
         <label className="block text-sm font-medium text-gray-700">Design Mode</label>
@@ -86,7 +112,21 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium text-gray-700">Handle Mount (M10×1.5)</label>
           <button
-            onClick={() => update({ threadEnabled: !settings.threadEnabled })}
+            onClick={() => {
+              const enabling = !settings.threadEnabled;
+              if (enabling) {
+                const outerD = settings.threadConfig.majorDiameter + 4;
+                const th = settings.threadConfig.height;
+                update({
+                  threadEnabled: true,
+                  width: Math.max(settings.width, outerD),
+                  height: Math.max(settings.height, outerD),
+                  baseThickness: Math.max(settings.baseThickness, th),
+                });
+              } else {
+                update({ threadEnabled: false });
+              }
+            }}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
               settings.threadEnabled ? "bg-amber-700" : "bg-gray-300"
             }`}

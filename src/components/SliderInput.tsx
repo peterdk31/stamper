@@ -1,5 +1,5 @@
 interface Props {
-  label: string;
+  label?: string;
   unit?: string;
   value: number;
   min: number;
@@ -17,10 +17,12 @@ export default function SliderInput({
 
   return (
     <div className={disabled ? "opacity-50" : ""}>
-      <div className="flex items-baseline justify-between mb-1">
-        <label className="text-sm font-medium text-gray-700">{label}</label>
-        <span className="text-xs text-gray-500 tabular-nums">{display}{unit ? ` ${unit}` : ""}</span>
-      </div>
+      {label != null && (
+        <div className="flex items-baseline justify-between mb-1">
+          <label className="text-sm font-medium text-gray-700">{label}</label>
+          <span className="text-xs text-gray-500 tabular-nums">{display}{unit ? ` ${unit}` : ""}</span>
+        </div>
+      )}
       <input
         type="range"
         value={value}
