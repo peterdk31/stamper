@@ -5,24 +5,28 @@ import type { PipelineStep, StepFlags, StepResult } from "@/lib/pipeline/types";
 type WorkerState = {
   data: DesignData | null;
   isProcessing: boolean;
+  progress: number;
 };
 
 type WorkerAction =
   | { type: "start" }
+  | { type: "progress"; progress: number }
   | { type: "done"; data: DesignData }
   | { type: "error" }
   | { type: "reset" };
 
-function workerReducer(_state: WorkerState, action: WorkerAction): WorkerState {
+function workerReducer(state: WorkerState, action: WorkerAction): WorkerState {
   switch (action.type) {
     case "start":
-      return { data: null, isProcessing: true };
+      return { data: null, isProcessing: true, progress: 0 };
+    case "progress":
+      return { ...state, progress: action.progress };
     case "done":
-      return { data: action.data, isProcessing: false };
+      return { data: action.data, isProcessing: false, progress: 1 };
     case "error":
-      return { data: null, isProcessing: false };
+      return { data: null, isProcessing: false, progress: 0 };
     case "reset":
-      return { data: null, isProcessing: false };
+      return { data: null, isProcessing: false, progress: 0 };
   }
 }
 
@@ -32,7 +36,7 @@ export function usePipelineStep(
   settings: StampSettings,
   flags: StepFlags,
 ): StepResult {
-  const [workerState, dispatch] = useReducer(workerReducer, { data: null, isProcessing: false });
+  const [workerState, dispatch] = useReducer(workerReducer, { data: null, isProcessing: false, progress: 0 });
   const workerRef = useRef<Worker | null>(null);
 
   const enabled = input !== null && input.shapes.length > 0 && step.enabled(settings, flags);
@@ -65,6 +69,14 @@ export function usePipelineStep(
 
     worker.onmessage = (e: MessageEvent) => {
       if (workerRef.current !== worker) return;
+
+      if (step.parseProgress) {
+        const p = step.parseProgress(e.data);
+        if (p !== null) {
+          dispatch({ type: "progress", progress: p });
+        }
+      }
+
       const parsed = step.parseResult(e.data, input);
       if (parsed !== input) {
         dispatch({ type: "done", data: parsed });
@@ -85,7 +97,7 @@ export function usePipelineStep(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, input, settings.width, settings.height, settings.nozzleDiameter, step]);
 
-  if (!enabled) return { data: input, isProcessing: false };
-  if (step.type === "sync") return { data: syncResult ?? input, isProcessing: false };
-  return { data: workerState.data ?? input, isProcessing: workerState.isProcessing };
+  if (!enabled) return { data: input, isProcessing: false, progress: 0 };
+  if (step.type === "sync") return { data: syncResult ?? input, isProcessing: false, progress: 0 };
+  return { data: workerState.data ?? input, isProcessing: workerState.isProcessing, progress: workerState.progress };
 }

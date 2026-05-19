@@ -11,6 +11,7 @@ import { computeTextBounds } from "@/lib/text-to-shapes";
 import { textToDesignData } from "@/lib/pipeline/text";
 import { mergeDesignData } from "@/lib/pipeline/merge";
 import { thickenStep } from "@/lib/pipeline/thicken";
+import { smoothStep } from "@/lib/pipeline/smooth";
 import type { StepFlags } from "@/lib/pipeline/types";
 import { usePipelineStep } from "./usePipelineStep";
 
@@ -26,6 +27,7 @@ export interface PipelineInputs {
   texts: StampText[];
   fontsReady: boolean;
   thickenEnabled: boolean;
+  smoothEnabled: boolean;
 }
 
 export interface PipelineOutputs {
@@ -37,6 +39,8 @@ export interface PipelineOutputs {
   traceProgress: number;
   traceStage: string;
   isThickening: boolean;
+  isSmoothing: boolean;
+  smoothProgress: number;
   isAutoFitting: boolean;
   hasDesign: boolean;
 
@@ -333,7 +337,7 @@ function useAutoFit(
 // ---------------------------------------------------------------------------
 
 export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
-  const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled } = inputs;
+  const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled, smoothEnabled } = inputs;
 
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
   const trace = useImageTrace(imageDataUrl, svgText);
@@ -357,13 +361,14 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   );
 
   // 4. Processing chain — add new steps here
-  const stepFlags: StepFlags = { thickenEnabled };
+  const stepFlags: StepFlags = { thickenEnabled, smoothEnabled };
   const afterThicken = usePipelineStep(thickenStep, merged, effectiveSettings, stepFlags);
+  const afterSmooth = usePipelineStep(smoothStep, afterThicken.data, effectiveSettings, stepFlags);
 
   // 5. Output: DesignData → THREE.Shape[]
   const shapes = useMemo(
-    () => afterThicken.data ? designDataToShapes(afterThicken.data) : [],
-    [afterThicken.data],
+    () => afterSmooth.data ? designDataToShapes(afterSmooth.data) : [],
+    [afterSmooth.data],
   );
 
   const rawDesignShapes = useMemo(
@@ -382,6 +387,8 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     traceProgress: trace.traceProgress,
     traceStage: trace.traceStage,
     isThickening: afterThicken.isProcessing,
+    isSmoothing: afterSmooth.isProcessing,
+    smoothProgress: afterSmooth.progress,
     isAutoFitting,
     hasDesign: rawDesignShapes.length > 0,
     onFindMinWidth,

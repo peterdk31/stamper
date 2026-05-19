@@ -24,10 +24,13 @@ export type { PipelineStep, SyncStep, WorkerStep, StepFlags, StepResult } from "
 export { textToDesignData } from "./text";
 export { mergeDesignData } from "./merge";
 export { thickenStep } from "./thicken";
+export { smoothStep } from "./smooth";
 
 import type { PipelineStep } from "./types";
 import { thickenStep } from "./thicken";
+import { smoothStep } from "./smooth";
 
 export const PROCESSING_STEPS: PipelineStep[] = [
   thickenStep,
+  smoothStep,
 ];

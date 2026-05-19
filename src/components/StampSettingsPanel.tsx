@@ -14,11 +14,15 @@ interface Props {
   onFindMinWidth?: () => void;
   thickenEnabled?: boolean;
   isThickening?: boolean;
+  smoothEnabled?: boolean;
+  isSmoothing?: boolean;
+  smoothProgress?: number;
   hasDesign?: boolean;
   onThickenToggle?: () => void;
+  onSmoothToggle?: () => void;
 }
 
-export default function StampSettingsPanel({ settings, onChange, isAutoFitting, onFindMinWidth, thickenEnabled, isThickening, hasDesign, onThickenToggle }: Props) {
+export default function StampSettingsPanel({ settings, onChange, isAutoFitting, onFindMinWidth, thickenEnabled, isThickening, smoothEnabled, isSmoothing, smoothProgress, hasDesign, onThickenToggle, onSmoothToggle }: Props) {
   function update(partial: Partial<StampSettings>) {
     onChange({ ...settings, ...partial });
   }
@@ -108,6 +112,33 @@ export default function StampSettingsPanel({ settings, onChange, isAutoFitting, 
             thickenEnabled ? "translate-x-4.5" : "translate-x-0.5"
           }`} />
         </button>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between">
+          <label className={`text-sm font-medium ${hasDesign ? "text-gray-700" : "text-gray-400"}`}>
+            {isSmoothing ? "Smoothing…" : "Smooth curves"}
+          </label>
+          <button
+            onClick={onSmoothToggle}
+            disabled={!hasDesign}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              smoothEnabled ? "bg-amber-700" : "bg-gray-300"
+            } ${!hasDesign ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+              smoothEnabled ? "translate-x-4.5" : "translate-x-0.5"
+            }`} />
+          </button>
+        </div>
+        {isSmoothing && (
+          <div className="mt-1.5 h-1 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-amber-700 rounded-full transition-[width] duration-150"
+              style={{ width: `${(smoothProgress ?? 0) * 100}%` }}
+            />
+          </div>
+        )}
       </div>
 
       <div>

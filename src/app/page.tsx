@@ -20,6 +20,7 @@ export default function Home() {
   const [availableFonts, setAvailableFonts] = useState<string[]>([]);
   const [fontsReady, setFontsReady] = useState(false);
   const [thickenEnabled, setThickenEnabled] = useState(false);
+  const [smoothEnabled, setSmoothEnabled] = useState(false);
 
   useEffect(() => {
     loadAllBundledFonts().then((entries) => {
@@ -42,6 +43,7 @@ export default function Home() {
     texts,
     fontsReady,
     thickenEnabled,
+    smoothEnabled,
   });
 
   const handleImageChange = useCallback((dataUrl: string | null, fileName?: string) => {
@@ -88,8 +90,12 @@ export default function Home() {
             isAutoFitting={pipeline.isAutoFitting}
             thickenEnabled={thickenEnabled}
             isThickening={pipeline.isThickening}
+            smoothEnabled={smoothEnabled}
+            isSmoothing={pipeline.isSmoothing}
+            smoothProgress={pipeline.smoothProgress}
             hasDesign={pipeline.hasDesign}
             onThickenToggle={() => setThickenEnabled((v) => !v)}
+            onSmoothToggle={() => setSmoothEnabled((v) => !v)}
             onFindMinWidth={pipeline.onFindMinWidth}
           />
         </aside>
