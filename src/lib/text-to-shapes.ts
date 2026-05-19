@@ -29,19 +29,19 @@ function layoutEntry(
     if (shapes.length === 0) continue;
 
     const charBox = new THREE.Box2();
-    for (const s of shapes) for (const p of s.getPoints()) charBox.expandByPoint(p);
+    for (const s of shapes) for (const p of s.getPoints(48)) charBox.expandByPoint(p);
 
     const shiftX = cursor - charBox.min.x;
     const shifted = shapes.map((s) => {
       const ns = new THREE.Shape();
-      const pts = s.getPoints();
+      const pts = s.getPoints(48);
       if (pts.length === 0) return ns;
       ns.moveTo(pts[0].x + shiftX, pts[0].y);
       for (let i = 1; i < pts.length; i++) ns.lineTo(pts[i].x + shiftX, pts[i].y);
       ns.closePath();
       for (const hole of s.holes) {
         const hp = new THREE.Path();
-        const hpts = hole.getPoints();
+        const hpts = hole.getPoints(48);
         if (hpts.length === 0) continue;
         hp.moveTo(hpts[0].x + shiftX, hpts[0].y);
         for (let i = 1; i < hpts.length; i++) hp.lineTo(hpts[i].x + shiftX, hpts[i].y);
@@ -53,7 +53,7 @@ function layoutEntry(
     cursor += (charBox.max.x - charBox.min.x) + spacing;
 
     const shiftedBox = new THREE.Box2();
-    for (const s of shifted) for (const p of s.getPoints()) shiftedBox.expandByPoint(p);
+    for (const s of shifted) for (const p of s.getPoints(48)) shiftedBox.expandByPoint(p);
     charShapes.push({ shapes: shifted, box: shiftedBox });
   }
 
@@ -143,7 +143,7 @@ export function textEntriesToShapes(
     const rotRad = (entry.rotation * Math.PI) / 180;
 
     for (const original of charShapes.flatMap(cs => cs.shapes)) {
-      const points = original.getPoints().map(p => {
+      const points = original.getPoints(48).map(p => {
         let x = p.x + offsetX;
         let y = p.y + offsetY;
         if (rotRad !== 0) [x, y] = rotatePoint(x, y, 0, 0, rotRad);
@@ -152,7 +152,7 @@ export function textEntriesToShapes(
 
       const holes: THREE.Vector2[][] = [];
       for (const hole of original.holes) {
-        holes.push(hole.getPoints().map(p => {
+        holes.push(hole.getPoints(48).map(p => {
           let x = p.x + offsetX;
           let y = p.y + offsetY;
           if (rotRad !== 0) [x, y] = rotatePoint(x, y, 0, 0, rotRad);

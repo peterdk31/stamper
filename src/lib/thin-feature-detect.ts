@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { StampShapeData } from "@/types/stamp";
 
 const INF = 1e10;
 const RESOLUTION = 0.1; // mm per pixel
@@ -176,6 +177,109 @@ export function computeThinFeatureMap(
 
   const dilationSq = (rPx + 1) * (rPx + 1);
 
+  const thin = new Uint8Array(n);
+  let thinCount = 0;
+  for (let i = 0; i < n; i++) {
+    if (mask[i] && sqDistToEroded[i] > dilationSq) {
+      thin[i] = 1;
+      thinCount++;
+    }
+  }
+
+  return { data: thin, gridW, gridH, resolution, hasThinFeatures: thinCount >= MIN_THIN_PIXELS };
+}
+
+function rasterizeShapeData(
+  shapes: StampShapeData[],
+  stampWidth: number,
+  stampHeight: number,
+  resolution: number,
+): { mask: Uint8Array; gridW: number; gridH: number } {
+  const gridW = Math.ceil(stampWidth / resolution) + 1;
+  const gridH = Math.ceil(stampHeight / resolution) + 1;
+  const n = gridW * gridH;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = gridW;
+  canvas.height = gridH;
+  const ctx = canvas.getContext("2d")!;
+
+  ctx.clearRect(0, 0, gridW, gridH);
+  ctx.fillStyle = "white";
+
+  for (const shape of shapes) {
+    if (shape.outer.length === 0) continue;
+    ctx.beginPath();
+    ctx.moveTo(shape.outer[0].x / resolution, shape.outer[0].y / resolution);
+    for (let i = 1; i < shape.outer.length; i++) {
+      ctx.lineTo(shape.outer[i].x / resolution, shape.outer[i].y / resolution);
+    }
+    ctx.closePath();
+
+    for (const hole of shape.holes) {
+      if (hole.length === 0) continue;
+      ctx.moveTo(hole[0].x / resolution, hole[0].y / resolution);
+      for (let i = 1; i < hole.length; i++) {
+        ctx.lineTo(hole[i].x / resolution, hole[i].y / resolution);
+      }
+      ctx.closePath();
+    }
+
+    ctx.fill("evenodd");
+  }
+
+  const imageData = ctx.getImageData(0, 0, gridW, gridH);
+  const mask = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    mask[i] = imageData.data[i * 4] > 128 ? 1 : 0;
+  }
+
+  return { mask, gridW, gridH };
+}
+
+export function computeThinFeatureMapFromData(
+  shapes: StampShapeData[],
+  stampWidth: number,
+  stampHeight: number,
+  nozzleDiameter: number,
+): ThinFeatureMap {
+  const resolution = RESOLUTION;
+  const { mask, gridW, gridH } = rasterizeShapeData(shapes, stampWidth, stampHeight, resolution);
+  const n = gridW * gridH;
+
+  let filledCount = 0;
+  for (let i = 0; i < n; i++) {
+    if (mask[i]) filledCount++;
+  }
+  if (filledCount === 0) {
+    return { data: new Uint8Array(n), gridW, gridH, resolution, hasThinFeatures: false };
+  }
+
+  const dtInput1 = new Float32Array(n);
+  for (let i = 0; i < n; i++) dtInput1[i] = mask[i] ? INF : 0;
+  const sqDistToBg = squaredEDT(dtInput1, gridW, gridH);
+
+  const rPx = nozzleDiameter / 2 / resolution;
+  const erosionSq = (rPx + 0.5) * (rPx + 0.5);
+
+  const eroded = new Uint8Array(n);
+  let hasEroded = false;
+  for (let i = 0; i < n; i++) {
+    if (mask[i] && sqDistToBg[i] >= erosionSq) {
+      eroded[i] = 1;
+      hasEroded = true;
+    }
+  }
+
+  if (!hasEroded) {
+    return { data: mask, gridW, gridH, resolution, hasThinFeatures: filledCount >= MIN_THIN_PIXELS };
+  }
+
+  const dtInput2 = new Float32Array(n);
+  for (let i = 0; i < n; i++) dtInput2[i] = eroded[i] ? 0 : INF;
+  const sqDistToEroded = squaredEDT(dtInput2, gridW, gridH);
+
+  const dilationSq = (rPx + 1) * (rPx + 1);
   const thin = new Uint8Array(n);
   let thinCount = 0;
   for (let i = 0; i < n; i++) {

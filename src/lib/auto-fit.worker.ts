@@ -1,7 +1,7 @@
 interface Point { x: number; y: number }
 
 interface ShapeData {
-  points: Point[];
+  outer: Point[];
   holes: Point[][];
 }
 
@@ -93,16 +93,16 @@ function hasThinFeatures(
   ctx.fillStyle = "white";
 
   for (const shape of shapes) {
-    if (shape.points.length === 0) continue;
+    if (shape.outer.length === 0) continue;
     ctx.beginPath();
     ctx.moveTo(
-      shape.points[0].x * scale / RESOLUTION + marginPx,
-      shape.points[0].y * scale / RESOLUTION + marginPx,
+      shape.outer[0].x * scale / RESOLUTION + marginPx,
+      shape.outer[0].y * scale / RESOLUTION + marginPx,
     );
-    for (let i = 1; i < shape.points.length; i++) {
+    for (let i = 1; i < shape.outer.length; i++) {
       ctx.lineTo(
-        shape.points[i].x * scale / RESOLUTION + marginPx,
-        shape.points[i].y * scale / RESOLUTION + marginPx,
+        shape.outer[i].x * scale / RESOLUTION + marginPx,
+        shape.outer[i].y * scale / RESOLUTION + marginPx,
       );
     }
     ctx.closePath();

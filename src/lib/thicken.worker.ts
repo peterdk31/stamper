@@ -4,8 +4,12 @@ interface Point {
 }
 
 interface ShapeData {
-  points: Point[];
+  outer: Point[];
   holes: Point[][];
+}
+
+interface BoundsData {
+  minX: number; minY: number; maxX: number; maxY: number;
 }
 
 export interface ThickenRequest {
@@ -17,7 +21,7 @@ export interface ThickenRequest {
 
 export type ThickenMessage =
   | { type: "progress"; progress: number; stage: string }
-  | { type: "result"; contours: Point[][] };
+  | { type: "result"; shapes: ShapeData[]; bounds: BoundsData };
 
 const RESOLUTION = 0.05; // mm per pixel
 const INF = 1e10;
@@ -222,6 +226,68 @@ function marchingSquares(grid: Uint8Array, w: number, h: number): Point[][] {
   return contours;
 }
 
+function signedArea(contour: Point[]): number {
+  let area = 0;
+  for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
+    area += (contour[j].x - contour[i].x) * (contour[j].y + contour[i].y);
+  }
+  return area / 2;
+}
+
+function pointInContour(px: number, py: number, contour: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
+    const yi = contour[i].y, yj = contour[j].y;
+    if ((yi > py) !== (yj > py) &&
+        px < (contour[j].x - contour[i].x) * (py - yi) / (yj - yi) + contour[i].x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function nestContoursToShapes(contours: Point[][]): ShapeData[] {
+  if (contours.length === 0) return [];
+
+  const indexed = contours.map((c, i) => ({
+    contour: c,
+    absArea: Math.abs(signedArea(c)),
+    index: i,
+  }));
+  indexed.sort((a, b) => b.absArea - a.absArea);
+
+  const depth = new Array<number>(indexed.length).fill(0);
+  const parent = new Array<number>(indexed.length).fill(-1);
+
+  for (let i = 1; i < indexed.length; i++) {
+    const p = indexed[i].contour[0];
+    for (let j = i - 1; j >= 0; j--) {
+      if (pointInContour(p.x, p.y, indexed[j].contour)) {
+        parent[i] = j;
+        depth[i] = depth[j] + 1;
+        break;
+      }
+    }
+  }
+
+  const shapes: ShapeData[] = [];
+  const shapeByIndex = new Map<number, ShapeData>();
+
+  for (let i = 0; i < indexed.length; i++) {
+    const pts = indexed[i].contour;
+    if (depth[i] % 2 === 0) {
+      const shape: ShapeData = { outer: pts, holes: [] };
+      shapes.push(shape);
+      shapeByIndex.set(i, shape);
+    } else {
+      const parentShape = shapeByIndex.get(parent[i]);
+      if (parentShape) parentShape.holes.push(pts);
+    }
+  }
+
+  return shapes;
+}
+
 self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const { shapes, stampWidth, stampHeight, nozzleDiameter } = e.data;
   const post = self.postMessage.bind(self);
@@ -235,27 +301,39 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const canvas = new OffscreenCanvas(gridW, gridH);
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, gridW, gridH);
-  ctx.fillStyle = "white";
+
+  const tmp = new OffscreenCanvas(gridW, gridH);
+  const tctx = tmp.getContext("2d")!;
 
   for (const shape of shapes) {
-    if (shape.points.length === 0) continue;
-    ctx.beginPath();
-    ctx.moveTo(shape.points[0].x / RESOLUTION + 1, (stampHeight - shape.points[0].y) / RESOLUTION + 1);
-    for (let i = 1; i < shape.points.length; i++) {
-      ctx.lineTo(shape.points[i].x / RESOLUTION + 1, (stampHeight - shape.points[i].y) / RESOLUTION + 1);
-    }
-    ctx.closePath();
+    if (shape.outer.length === 0) continue;
 
-    for (const hole of shape.holes) {
-      if (hole.length === 0) continue;
-      ctx.moveTo(hole[0].x / RESOLUTION + 1, (stampHeight - hole[0].y) / RESOLUTION + 1);
-      for (let i = 1; i < hole.length; i++) {
-        ctx.lineTo(hole[i].x / RESOLUTION + 1, (stampHeight - hole[i].y) / RESOLUTION + 1);
+    tctx.clearRect(0, 0, gridW, gridH);
+    tctx.globalCompositeOperation = "source-over";
+    tctx.fillStyle = "white";
+    tctx.beginPath();
+    tctx.moveTo(shape.outer[0].x / RESOLUTION + 1, (stampHeight - shape.outer[0].y) / RESOLUTION + 1);
+    for (let i = 1; i < shape.outer.length; i++) {
+      tctx.lineTo(shape.outer[i].x / RESOLUTION + 1, (stampHeight - shape.outer[i].y) / RESOLUTION + 1);
+    }
+    tctx.closePath();
+    tctx.fill();
+
+    if (shape.holes.length > 0) {
+      tctx.globalCompositeOperation = "destination-out";
+      for (const hole of shape.holes) {
+        if (hole.length === 0) continue;
+        tctx.beginPath();
+        tctx.moveTo(hole[0].x / RESOLUTION + 1, (stampHeight - hole[0].y) / RESOLUTION + 1);
+        for (let i = 1; i < hole.length; i++) {
+          tctx.lineTo(hole[i].x / RESOLUTION + 1, (stampHeight - hole[i].y) / RESOLUTION + 1);
+        }
+        tctx.closePath();
+        tctx.fill();
       }
-      ctx.closePath();
     }
 
-    ctx.fill("evenodd");
+    ctx.drawImage(tmp, 0, 0);
   }
 
   const imageData = ctx.getImageData(0, 0, gridW, gridH);
@@ -290,17 +368,45 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   post({ type: "progress", progress: 0.8, stage: "Simplifying…" } as ThickenMessage);
 
+  const MIN_CONTOUR_AREA = 4;
+  const DEDUP_SQ = RESOLUTION * RESOLUTION * 0.25;
+
   const contours: Point[][] = [];
   for (const contour of rawContours) {
+    if (Math.abs(signedArea(contour)) < MIN_CONTOUR_AREA) continue;
+
     const s = simplifyContour(contour, 0.5);
-    if (s.length >= 3) {
-      contours.push(s.map((p) => ({
-        x: (p.x - 1) * RESOLUTION,
-        y: stampHeight - (p.y - 1) * RESOLUTION,
-      })));
+    if (s.length < 3) continue;
+
+    const mm = s.map((p) => ({
+      x: (p.x - 1) * RESOLUTION,
+      y: stampHeight - (p.y - 1) * RESOLUTION,
+    }));
+
+    const clean: Point[] = [mm[0]];
+    for (let i = 1; i < mm.length; i++) {
+      const prev = clean[clean.length - 1];
+      const dx = mm[i].x - prev.x;
+      const dy = mm[i].y - prev.y;
+      if (dx * dx + dy * dy > DEDUP_SQ) clean.push(mm[i]);
     }
+    if (clean.length >= 3) contours.push(clean);
   }
 
+  const resultShapes = nestContoursToShapes(contours);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const s of resultShapes) {
+    for (const p of s.outer) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  const bounds: BoundsData = minX === Infinity
+    ? { minX: 0, minY: 0, maxX: 0, maxY: 0 }
+    : { minX, minY, maxX, maxY };
+
   post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
-  post({ type: "result", contours } as ThickenMessage);
+  post({ type: "result", shapes: resultShapes, bounds } as ThickenMessage);
 };

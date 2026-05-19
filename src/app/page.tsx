@@ -3,10 +3,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import * as THREE from "three";
-import { DEFAULT_STAMP_SETTINGS, type StampSettings, type StampText } from "@/types/stamp";
-import { contoursToShapes } from "@/lib/image-trace";
+import { DEFAULT_STAMP_SETTINGS, type StampSettings, type StampText, type DesignData } from "@/types/stamp";
 import type { TraceMessage } from "@/lib/image-trace.worker";
-import { parseRawSvg, scaleRawSvgToStamp, getSvgAspectRatio, type RawSvgData } from "@/lib/svg-parse";
+import { rasterToDesignData, designDataToShapes } from "@/lib/design-data";
 import { loadAllBundledFonts, getFontCache, type FontEntry } from "@/lib/font-manager";
 import { textEntriesToShapes, computeTextBounds } from "@/lib/text-to-shapes";
 import type { AutoFitResult } from "@/lib/auto-fit.worker";
@@ -27,7 +26,6 @@ export default function Home() {
   const [rawImageDims, setRawImageDims] = useState<{ w: number; h: number } | null>(null);
   const [availableFonts, setAvailableFonts] = useState<string[]>([]);
   const [fontsReady, setFontsReady] = useState(false);
-  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
 
   useEffect(() => {
     loadAllBundledFonts().then((entries) => {
@@ -42,15 +40,18 @@ export default function Home() {
     );
   }, []);
 
-  // Derive stamp height from content when auto-size is on
+  const sourceAspectRatio = useMemo(() => {
+    if (rawImageDims) return rawImageDims.w / rawImageDims.h;
+    return null;
+  }, [rawImageDims]);
+
   const effectiveHeight = useMemo(() => {
     if (!settings.autoSize) return settings.height;
 
     let newHeight: number | null = null;
 
-    const aspectRatio = svgText ? getSvgAspectRatio(svgText) : imageAspectRatio;
-    if (aspectRatio && aspectRatio > 0) {
-      newHeight = settings.width / aspectRatio;
+    if (sourceAspectRatio && sourceAspectRatio > 0) {
+      newHeight = settings.width / sourceAspectRatio;
     }
 
     if (texts.length > 0 && fontsReady) {
@@ -66,7 +67,7 @@ export default function Home() {
     if (newHeight === null) return settings.height;
     const minHeight = settings.threadEnabled ? Math.max(10, settings.threadConfig.majorDiameter + 4) : 10;
     return Math.round(Math.max(minHeight, newHeight) * 10) / 10;
-  }, [settings.autoSize, settings.height, settings.width, settings.padding, settings.threadEnabled, settings.threadConfig.majorDiameter, svgText, imageAspectRatio, texts, fontsReady]);
+  }, [settings.autoSize, settings.height, settings.width, settings.padding, settings.threadEnabled, settings.threadConfig.majorDiameter, sourceAspectRatio, texts, fontsReady]);
 
   const effectiveSettings = useMemo(() =>
     effectiveHeight !== settings.height ? { ...settings, height: effectiveHeight } : settings,
@@ -77,7 +78,7 @@ export default function Home() {
   const autoFitWorkerRef = useRef<Worker | null>(null);
 
   const [thickenEnabled, setThickenEnabled] = useState(false);
-  const [thickenedShapes, setThickenedShapes] = useState<THREE.Shape[] | null>(null);
+  const [thickenedData, setThickenedData] = useState<DesignData | null>(null);
   const [isThickening, setIsThickening] = useState(false);
 
   const [isTracing, setIsTracing] = useState(false);
@@ -97,28 +98,26 @@ export default function Home() {
     return terminateWorker;
   }, [terminateWorker]);
 
-  // Phase 1: Load and decode raster image (sets aspect ratio + pixel data).
-  // This is separated from tracing so setImageAspectRatio doesn't kill
-  // the worker via an effectiveSettings → useEffect re-trigger loop.
   useEffect(() => {
     setLoadedPixels(null);
 
-    if (!imageDataUrl) {
-      setImageAspectRatio(null);
-      return;
-    }
+    const src = imageDataUrl
+      ?? (svgText ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}` : null);
+    if (!src) return;
 
     setIsTracing(true);
     setTraceProgress(0);
-    setTraceStage("Loading image…");
+    setTraceStage(svgText ? "Rendering SVG…" : "Loading image…");
 
+    let cancelled = false;
     const img = new window.Image();
-    img.onerror = () => setIsTracing(false);
+    img.onerror = () => { if (!cancelled) setIsTracing(false); };
     img.onload = () => {
-      setImageAspectRatio(img.width / img.height);
-
-      const MAX_TRACE_DIM = 800;
-      const scale = Math.min(1, MAX_TRACE_DIM / Math.max(img.width, img.height));
+      if (cancelled) return;
+      const MAX_TRACE_DIM = 2000;
+      const scale = svgText
+        ? MAX_TRACE_DIM / Math.max(img.width, img.height)
+        : Math.min(1, MAX_TRACE_DIM / Math.max(img.width, img.height));
       const tw = Math.round(img.width * scale);
       const th = Math.round(img.height * scale);
 
@@ -129,12 +128,13 @@ export default function Home() {
       ctx.drawImage(img, 0, 0, tw, th);
       setLoadedPixels(ctx.getImageData(0, 0, tw, th));
     };
-    img.src = imageDataUrl;
-  }, [imageDataUrl]);
+    img.src = src;
 
-  // Phase 2: Trace contours in pixel space (no dependency on stamp dimensions).
+    return () => { cancelled = true; };
+  }, [imageDataUrl, svgText]);
+
   useEffect(() => {
-    if (svgText || !loadedPixels) {
+    if (!loadedPixels) {
       terminateWorker();
       if (!imageDataUrl && !svgText) {
         setIsTracing(false);
@@ -155,6 +155,7 @@ export default function Home() {
     workerRef.current = worker;
 
     worker.onmessage = (e: MessageEvent<TraceMessage>) => {
+      if (workerRef.current !== worker) return;
       const msg = e.data;
       if (msg.type === "progress") {
         setTraceProgress(msg.progress);
@@ -168,6 +169,7 @@ export default function Home() {
     };
 
     worker.onerror = () => {
+      if (workerRef.current !== worker) return;
       setIsTracing(false);
       terminateWorker();
     };
@@ -180,52 +182,37 @@ export default function Home() {
     });
   }, [svgText, loadedPixels, imageDataUrl, terminateWorker]);
 
-  // SVG: parse once, scale is handled in the useMemo below.
-  const rawSvgData = useMemo<RawSvgData | null>(() => {
-    if (!svgText) return null;
-    return parseRawSvg(svgText);
-  }, [svgText]);
-
-  // Scale raw design data to current stamp dimensions (instant, no re-trace).
-  const rawDesignShapes = useMemo(() => {
-    if (rawSvgData) {
-      return scaleRawSvgToStamp(rawSvgData, effectiveSettings.width, effectiveSettings.height);
-    }
+  const designData = useMemo<DesignData | null>(() => {
     if (rawContours && rawImageDims) {
-      const scale = Math.min(
-        effectiveSettings.width / rawImageDims.w,
-        effectiveSettings.height / rawImageDims.h,
-      );
-      const offsetX = (effectiveSettings.width - rawImageDims.w * scale) / 2;
-      const offsetY = (effectiveSettings.height - rawImageDims.h * scale) / 2;
-      const scaled = rawContours.map((c) =>
-        c.map((p) => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY })),
-      );
-      return contoursToShapes(scaled);
+      return rasterToDesignData(rawContours, rawImageDims, effectiveSettings.width, effectiveSettings.height);
     }
-    return [];
-  }, [rawSvgData, rawContours, rawImageDims, effectiveSettings.width, effectiveSettings.height]);
+    return null;
+  }, [rawContours, rawImageDims, effectiveSettings.width, effectiveSettings.height]);
+
+  const rawDesignShapes = useMemo(() => {
+    if (!designData) return [];
+    return designDataToShapes(designData);
+  }, [designData]);
 
   useEffect(() => {
-    if (!thickenEnabled || rawDesignShapes.length === 0) {
-      setThickenedShapes(null);
+    if (!thickenEnabled || !designData || designData.shapes.length === 0) {
+      setThickenedData(null);
       setIsThickening(false);
       return;
     }
 
     setIsThickening(true);
-    setThickenedShapes(null);
-
-    const serialized = rawDesignShapes.map((s) => ({
-      points: s.getPoints().map((p) => ({ x: p.x, y: p.y })),
-      holes: s.holes.map((h) => h.getPoints().map((p) => ({ x: p.x, y: p.y }))),
-    }));
+    setThickenedData(null);
 
     const worker = new Worker(new URL("../lib/thicken.worker.ts", import.meta.url));
 
     worker.onmessage = (e: MessageEvent<ThickenMessage>) => {
       if (e.data.type === "result") {
-        setThickenedShapes(contoursToShapes(e.data.contours));
+        setThickenedData({
+          shapes: e.data.shapes,
+          bounds: e.data.bounds,
+          sourceAspectRatio: designData.sourceAspectRatio,
+        });
         setIsThickening(false);
       }
     };
@@ -235,7 +222,7 @@ export default function Home() {
     };
 
     worker.postMessage({
-      shapes: serialized,
+      shapes: designData.shapes,
       stampWidth: effectiveSettings.width,
       stampHeight: effectiveSettings.height,
       nozzleDiameter: effectiveSettings.nozzleDiameter,
@@ -244,9 +231,12 @@ export default function Home() {
     return () => {
       worker.terminate();
     };
-  }, [thickenEnabled, rawDesignShapes, effectiveSettings.nozzleDiameter, effectiveSettings.width, effectiveSettings.height]);
+  }, [thickenEnabled, designData, effectiveSettings.nozzleDiameter, effectiveSettings.width, effectiveSettings.height]);
 
-  const designShapes = thickenedShapes ?? rawDesignShapes;
+  const designShapes = useMemo(() =>
+    thickenedData ? designDataToShapes(thickenedData) : rawDesignShapes,
+    [thickenedData, rawDesignShapes],
+  );
 
   const textShapes = useMemo(() => {
     if (!fontsReady) return [];
@@ -314,8 +304,8 @@ export default function Home() {
               if (contentW <= 0 || contentH <= 0) { setIsAutoFitting(false); return; }
 
               const serialized = allShapes.map((s) => ({
-                points: s.getPoints().map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y })),
-                holes: s.holes.map((h) => h.getPoints().map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y }))),
+                outer: s.getPoints(48).map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y })),
+                holes: s.holes.map((h) => h.getPoints(48).map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y }))),
               }));
 
               if (autoFitWorkerRef.current) autoFitWorkerRef.current.terminate();
