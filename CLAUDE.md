@@ -15,15 +15,34 @@ Ceramic Stamps is a client-only Next.js web app that generates STL files for 3D-
 
 ## Architecture
 
-### Data flow
+### Pipeline
 
-`page.tsx` owns all state (`StampSettings`, image/SVG data, `StampText[]`, derived `THREE.Shape[]`). The pipeline:
+`DesignData` is the universal intermediate format. All inputs produce `DesignData`, all processing steps transform `DesignData → DesignData`, and a single conversion to `THREE.Shape[]` happens at the end. See `src/lib/pipeline/index.ts` for the pipeline overview.
 
-1. **Image input**: raster → `image-trace.ts` (contour trace with Douglas-Peucker simplification) → `THREE.Shape[]`; SVG → `svg-parse.ts` (Three.js `SVGLoader`) → `THREE.Shape[]`
-2. **Text input**: `text-to-shapes.ts` uses `font-manager.ts` to load fonts, calls `font.generateShapes()`, applies position/rotation offsets → `THREE.Shape[]`
-3. **Geometry**: `stamp-geometry.ts` takes settings + design shapes + text shapes → mirrors them → builds `THREE.Group` (rounded-rect base + extruded shapes). Adds female thread geometry when handle mount enabled.
-4. **Clay preview**: `clay-geometry.ts` takes the same shapes *unmirrored* and builds an inverted impression (raised stamp → recessed clay).
-5. **Export**: `stl-export.ts` walks the Three.js scene graph → binary STL blob → browser download.
+```
+Sources (parallel):                Processing (sequential):           Output:
+┌──────────────────┐               ┌─────────────────────┐
+│ Image/SVG        │──┐            │ thicken (optional)  │
+│ → trace → data   │  ├─ merge ──→│ [new steps here]    │──→ toShapes ──→ geometry
+├──────────────────┤  │            └─────────────────────┘
+│ Text → data      │──┘
+└──────────────────┘
+```
+
+**Adding a new processing step:**
+1. Create a `PipelineStep` (see `src/lib/pipeline/types.ts` for the interface — supports sync and worker variants)
+2. Add it to `PROCESSING_STEPS` in `src/lib/pipeline/index.ts`
+3. Add a `usePipelineStep()` call in `src/hooks/useStampPipeline.ts`
+
+**Key files:**
+- `src/lib/pipeline/index.ts` — pipeline definition and step registry
+- `src/hooks/useStampPipeline.ts` — React hook that composes the full pipeline
+- `src/hooks/usePipelineStep.ts` — generic hook that runs any `PipelineStep`
+
+**Geometry output:**
+- `stamp-geometry.ts` takes settings + unified `shapes` → mirrors them → builds `THREE.Group`
+- `clay-geometry.ts` takes the same shapes *unmirrored* → builds inverted impression
+- `stl-export.ts` walks the Three.js scene graph → binary STL blob → browser download
 
 ### Key libraries
 
@@ -35,9 +54,18 @@ Ceramic Stamps is a client-only Next.js web app that generates STL files for 3D-
 ### Source layout
 
 - `src/types/stamp.ts` — all domain types: `StampSettings`, `StampText`, `ThreadConfig`, `HandleStyle`, nozzle-preset constants
+- `src/lib/pipeline/` — pipeline definition and steps:
+  - `index.ts` — pipeline overview, `PROCESSING_STEPS` registry
+  - `types.ts` — `PipelineStep` interface (sync and worker variants), `StepFlags`
+  - `text.ts` — `textToDesignData()` — wraps text-to-shapes to produce `DesignData`
+  - `merge.ts` — `mergeDesignData()` — combines multiple `DesignData` sources
+  - `thicken.ts` — thicken step definition (wraps `thicken.worker.ts`)
+- `src/hooks/` — React pipeline orchestration:
+  - `useStampPipeline.ts` — full pipeline composition hook (sources → merge → steps → shapes)
+  - `usePipelineStep.ts` — generic hook that runs any `PipelineStep`
 - `src/lib/` — pure logic, no React:
-  - `image-trace.ts` — bitmap → contour shapes (marching-squares + Douglas-Peucker simplification)
-  - `svg-parse.ts` — SVG text → shapes via Three.js SVGLoader
+  - `image-trace.worker.ts` — bitmap → contour shapes (marching-squares + Douglas-Peucker simplification)
+  - `design-data.ts` — `rasterToDesignData()`, `designDataToShapes()`, contour nesting
   - `stamp-geometry.ts` — builds stamp `THREE.Group` (rounded-rect base, design extrusion, female thread). Contains `mirrorShapes()` and `createRoundedRectShape()`.
   - `clay-geometry.ts` — builds clay impression preview (inverted stamp design, unmirrored)
   - `stl-export.ts` — binary STL writer + download helper

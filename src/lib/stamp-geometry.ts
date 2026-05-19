@@ -52,8 +52,7 @@ function mirrorShapes(shapes: THREE.Shape[], width: number): THREE.Shape[] {
 
 export function buildStampGeometry(
   settings: StampSettings,
-  designShapes: THREE.Shape[],
-  textShapes: THREE.Shape[] = [],
+  shapes: THREE.Shape[],
 ): THREE.Group {
   const group = new THREE.Group();
   const totalHeight = settings.baseThickness + settings.impressionDepth;
@@ -97,7 +96,7 @@ export function buildStampGeometry(
     group.add(new THREE.Mesh(baseGeo, baseMat));
   }
 
-  const allShapes = [...designShapes, ...textShapes];
+  const allShapes = shapes;
   if (allShapes.length > 0) {
     const mirrored = mirrorShapes(allShapes, settings.width);
 

@@ -11,17 +11,16 @@ import type { StampSettings } from "@/types/stamp";
 
 interface Props {
   settings: StampSettings;
-  designShapes: THREE.Shape[];
-  textShapes: THREE.Shape[];
+  shapes: THREE.Shape[];
   exportName: string;
 }
 
-export default function StampPreview({ settings, designShapes, textShapes, exportName }: Props) {
+export default function StampPreview({ settings, shapes, exportName }: Props) {
   const stampRef = useRef<THREE.Group>(null);
 
   const stampGroup = useMemo(
-    () => buildStampGeometry(settings, designShapes, textShapes),
-    [settings, designShapes, textShapes],
+    () => buildStampGeometry(settings, shapes),
+    [settings, shapes],
   );
 
   const handleGroup = useMemo(() => {

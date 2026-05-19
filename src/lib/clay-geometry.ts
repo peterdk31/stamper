@@ -10,8 +10,7 @@ const CLAY_DEPTH = 5;
  */
 export function buildClayImpressionGeometry(
   settings: StampSettings,
-  designShapes: THREE.Shape[],
-  textShapes: THREE.Shape[] = [],
+  shapes: THREE.Shape[],
 ): THREE.Group {
   const group = new THREE.Group();
   const isStampRaised = settings.designMode === "raised";
@@ -25,7 +24,7 @@ export function buildClayImpressionGeometry(
   const clayMesh = new THREE.Mesh(clayGeo, clayMat);
   group.add(clayMesh);
 
-  const allShapes = [...designShapes, ...textShapes];
+  const allShapes = shapes;
   if (allShapes.length === 0) return group;
 
   if (isStampRaised) {
