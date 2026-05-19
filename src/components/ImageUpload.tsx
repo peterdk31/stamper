@@ -9,11 +9,15 @@ interface Props {
   onImageChange: (dataUrl: string | null) => void;
   onSvgChange: (svgText: string | null) => void;
   onSimplificationChange: (value: number) => void;
+  isProcessing?: boolean;
+  progress?: number;
+  progressStage?: string;
 }
 
 export default function ImageUpload({
   imageDataUrl, svgText, simplification,
   onImageChange, onSvgChange, onSimplificationChange,
+  isProcessing, progress = 0, progressStage = "",
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isSvg = svgText !== null;
@@ -62,10 +66,28 @@ export default function ImageUpload({
       <div
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
-        onClick={() => inputRef.current?.click()}
-        className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-amber-500 transition-colors"
+        onClick={() => !isProcessing && inputRef.current?.click()}
+        className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+          isProcessing
+            ? "border-amber-400 cursor-wait"
+            : "border-gray-300 cursor-pointer hover:border-amber-500"
+        }`}
       >
-        {imageDataUrl ? (
+        {isProcessing ? (
+          <div className="space-y-3">
+            <div className="flex justify-center">
+              <div className="h-8 w-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+            <p className="text-sm text-gray-600">{progressStage}</p>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-amber-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${Math.round(progress * 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400">{Math.round(progress * 100)}%</p>
+          </div>
+        ) : imageDataUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imageDataUrl} alt="Uploaded outline" className="mx-auto max-h-40 object-contain" />
         ) : isSvg ? (
@@ -88,7 +110,7 @@ export default function ImageUpload({
         }}
       />
 
-      {imageDataUrl && !isSvg && (
+      {imageDataUrl && !isSvg && !isProcessing && (
         <div>
           <label className="block text-sm font-medium text-gray-700">
             Simplification: {simplification.toFixed(2)}
@@ -109,7 +131,7 @@ export default function ImageUpload({
         </div>
       )}
 
-      {hasContent && (
+      {hasContent && !isProcessing && (
         <button
           onClick={handleClear}
           className="text-sm text-red-600 hover:text-red-800"

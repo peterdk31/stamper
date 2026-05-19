@@ -18,16 +18,18 @@ interface Props {
 export default function StampPreview({ settings, designShapes, textShapes }: Props) {
   const stampRef = useRef<THREE.Group>(null);
 
-  const stampGroup = useMemo(() => {
-    const group = buildStampGeometry(settings, designShapes, textShapes);
-    if (settings.threadEnabled) {
-      const handle = createHandle(settings.threadConfig);
-      handle.position.set(settings.width / 2, settings.height / 2, settings.threadConfig.height);
-      handle.rotation.x = Math.PI;
-      group.add(handle);
-    }
-    return group;
-  }, [settings, designShapes, textShapes]);
+  const stampGroup = useMemo(
+    () => buildStampGeometry(settings, designShapes, textShapes),
+    [settings, designShapes, textShapes],
+  );
+
+  const handleGroup = useMemo(() => {
+    if (!settings.threadEnabled) return null;
+    const handle = createHandle(settings.threadConfig);
+    handle.position.set(settings.width / 2, settings.height / 2, settings.threadConfig.height);
+    handle.rotation.x = Math.PI;
+    return handle;
+  }, [settings.threadEnabled, settings.threadConfig, settings.width, settings.height]);
 
   const center = useMemo(
     () => new THREE.Vector3(
@@ -44,8 +46,8 @@ export default function StampPreview({ settings, designShapes, textShapes }: Pro
   }
 
   function handleExportHandle() {
-    const handleGroup = createHandle(settings.threadConfig);
-    downloadSTL(handleGroup, "handle-knob.stl");
+    const handle = createHandle(settings.threadConfig);
+    downloadSTL(handle, "handle-knob.stl");
   }
 
   return (
@@ -57,6 +59,7 @@ export default function StampPreview({ settings, designShapes, textShapes }: Pro
             <ambientLight intensity={0.5} />
             <directionalLight position={[50, 50, 50]} intensity={1} />
             <primitive ref={stampRef} object={stampGroup} />
+            {handleGroup && <primitive object={handleGroup} />}
             <OrbitControls target={center} />
             <gridHelper args={[200, 20, 0x444444, 0x222222]} rotation={[Math.PI / 2, 0, 0]} />
           </Canvas>

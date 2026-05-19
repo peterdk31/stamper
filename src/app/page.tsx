@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import * as THREE from "three";
 import { DEFAULT_STAMP_SETTINGS, type StampSettings, type StampText } from "@/types/stamp";
-import { traceImageToShapes } from "@/lib/image-trace";
+import { contoursToShapes } from "@/lib/image-trace";
+import type { TraceRequest, TraceMessage } from "@/lib/image-trace.worker";
 import { parseSvgToShapes, getSvgAspectRatio } from "@/lib/svg-parse";
 import { loadAllBundledFonts, getFontCache, type FontEntry } from "@/lib/font-manager";
 import { textEntriesToShapes, computeTextBounds } from "@/lib/text-to-shapes";
@@ -67,38 +68,93 @@ export default function Home() {
     [settings, effectiveHeight],
   );
 
+  const [isTracing, setIsTracing] = useState(false);
+  const [traceProgress, setTraceProgress] = useState(0);
+  const [traceStage, setTraceStage] = useState("");
+  const workerRef = useRef<Worker | null>(null);
+
+  const terminateWorker = useCallback(() => {
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return terminateWorker;
+  }, [terminateWorker]);
+
   const processRasterImage = useCallback(
     (dataUrl: string) => {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         setImageAspectRatio(img.width / img.height);
+
         const canvas = document.createElement("canvas");
         canvas.width = img.width;
         canvas.height = img.height;
         const ctx = canvas.getContext("2d")!;
         ctx.drawImage(img, 0, 0);
         const imageData = ctx.getImageData(0, 0, img.width, img.height);
-        const shapes = traceImageToShapes(
-          imageData, effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification,
+
+        terminateWorker();
+        setIsTracing(true);
+        setTraceProgress(0);
+        setTraceStage("Starting…");
+
+        const worker = new Worker(
+          new URL("../lib/image-trace.worker.ts", import.meta.url),
         );
-        setDesignShapes(shapes);
+        workerRef.current = worker;
+
+        worker.onmessage = (e: MessageEvent<TraceMessage>) => {
+          const msg = e.data;
+          if (msg.type === "progress") {
+            setTraceProgress(msg.progress);
+            setTraceStage(msg.stage);
+          } else if (msg.type === "result") {
+            setDesignShapes(contoursToShapes(msg.contours));
+            setIsTracing(false);
+            terminateWorker();
+          }
+        };
+
+        worker.onerror = () => {
+          setIsTracing(false);
+          terminateWorker();
+        };
+
+        const req: TraceRequest = {
+          width: imageData.width,
+          height: imageData.height,
+          data: imageData.data,
+          targetWidth: effectiveSettings.width,
+          targetHeight: effectiveSettings.height,
+          simplification: effectiveSettings.simplification,
+          threshold: 128,
+        };
+        worker.postMessage(req);
       };
       img.src = dataUrl;
     },
-    [effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification],
+    [effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, terminateWorker],
   );
 
   useEffect(() => {
     if (svgText) {
+      terminateWorker();
+      setIsTracing(false);
       const shapes = parseSvgToShapes(svgText, effectiveSettings.width, effectiveSettings.height);
       setDesignShapes(shapes);
     } else if (imageDataUrl) {
       processRasterImage(imageDataUrl);
     } else {
+      terminateWorker();
+      setIsTracing(false);
       setDesignShapes([]);
       setImageAspectRatio(null);
     }
-  }, [svgText, imageDataUrl, effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, processRasterImage]);
+  }, [svgText, imageDataUrl, effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, processRasterImage, terminateWorker]);
 
   const textShapes = useMemo(() => {
     if (!fontsReady) return [];
@@ -121,6 +177,9 @@ export default function Home() {
             onImageChange={setImageDataUrl}
             onSvgChange={setSvgText}
             onSimplificationChange={(v) => setSettings((s) => ({ ...s, simplification: v }))}
+            isProcessing={isTracing}
+            progress={traceProgress}
+            progressStage={traceStage}
           />
           <TextEditor
             texts={texts}

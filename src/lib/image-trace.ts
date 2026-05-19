@@ -1,6 +1,23 @@
 import * as THREE from "three";
 import { simplifyContour } from "./simplify";
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+export function contoursToShapes(contours: Point[][]): THREE.Shape[] {
+  return contours.map((contour) => {
+    const shape = new THREE.Shape();
+    shape.moveTo(contour[0].x, contour[0].y);
+    for (let i = 1; i < contour.length; i++) {
+      shape.lineTo(contour[i].x, contour[i].y);
+    }
+    shape.closePath();
+    return shape;
+  });
+}
+
 export function traceImageToShapes(
   imageData: ImageData,
   targetWidth: number,
