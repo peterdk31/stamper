@@ -86,7 +86,15 @@ export default function Home() {
 
   const processRasterImage = useCallback(
     (dataUrl: string) => {
+      terminateWorker();
+      setIsTracing(true);
+      setTraceProgress(0);
+      setTraceStage("Loading image…");
+
       const img = new window.Image();
+      img.onerror = () => {
+        setIsTracing(false);
+      };
       img.onload = () => {
         setImageAspectRatio(img.width / img.height);
 
@@ -101,11 +109,6 @@ export default function Home() {
         const ctx = canvas.getContext("2d")!;
         ctx.drawImage(img, 0, 0, tw, th);
         const imageData = ctx.getImageData(0, 0, tw, th);
-
-        terminateWorker();
-        setIsTracing(true);
-        setTraceProgress(0);
-        setTraceStage("Starting…");
 
         const worker = new Worker(
           new URL("../lib/image-trace.worker.ts", import.meta.url),

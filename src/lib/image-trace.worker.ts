@@ -54,91 +54,135 @@ export type TraceMessage =
   | { type: "progress"; progress: number; stage: string }
   | { type: "result"; contours: Point[][] };
 
-const DX = [1, 1, 0, -1, -1, -1, 0, 1];
-const DY = [0, 1, 1, 1, 0, -1, -1, -1];
-
-function followContour(
-  edge: Uint8Array,
-  width: number,
-  height: number,
-  startX: number,
-  startY: number,
-  visited: Uint8Array,
-): Point[] {
-  const contour: Point[] = [];
-  let x = startX;
-  let y = startY;
-  let dir = 0;
-
-  do {
-    const idx = y * width + x;
-    if (!visited[idx]) {
-      visited[idx] = 1;
-      contour.push({ x, y });
-    }
-
-    let found = false;
-    for (let i = 0; i < 8; i++) {
-      const tryDir = (dir + 7 + i) & 7;
-      const nx = x + DX[tryDir];
-      const ny = y + DY[tryDir];
-
-      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-      if (!edge[ny * width + nx]) continue;
-
-      x = nx;
-      y = ny;
-      dir = tryDir;
-      found = true;
-      break;
-    }
-
-    if (!found) break;
-  } while (x !== startX || y !== startY);
-
-  return contour;
-}
-
 type ProgressFn = (progress: number, stage: string) => void;
 
-function traceContours(
+// Marching squares case table.
+// Corner bits: bit0=TL, bit1=TR, bit2=BR, bit3=BL.
+// Edges: 0=top, 1=right, 2=bottom, 3=left.
+// Each row: [segmentCount, e1a, e1b, e2a, e2b] (-1 = unused).
+const CASE_TABLE = [
+  0, -1, -1, -1, -1, //  0: all outside
+  1,  0,  3, -1, -1, //  1: TL
+  1,  0,  1, -1, -1, //  2: TR
+  1,  1,  3, -1, -1, //  3: TL+TR
+  1,  1,  2, -1, -1, //  4: BR
+  2,  0,  3,  1,  2, //  5: TL+BR (saddle)
+  1,  0,  2, -1, -1, //  6: TR+BR
+  1,  2,  3, -1, -1, //  7: TL+TR+BR
+  1,  2,  3, -1, -1, //  8: BL
+  1,  0,  2, -1, -1, //  9: TL+BL
+  2,  0,  1,  2,  3, // 10: TR+BL (saddle)
+  1,  1,  2, -1, -1, // 11: TL+TR+BL
+  1,  1,  3, -1, -1, // 12: BR+BL
+  1,  0,  1, -1, -1, // 13: TL+BR+BL
+  1,  0,  3, -1, -1, // 14: TR+BR+BL
+  0, -1, -1, -1, -1, // 15: all inside
+];
+
+function marchingSquares(
   grid: Uint8Array,
-  width: number,
-  height: number,
+  w: number,
+  h: number,
   report: ProgressFn,
 ): Point[][] {
-  const n = width * height;
-  const edge = new Uint8Array(n);
+  const cellsW = w - 1;
+  const cellsH = h - 1;
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      if (!grid[idx]) continue;
-      if (
-        x === 0 || y === 0 || x === width - 1 || y === height - 1 ||
-        !grid[idx - 1] || !grid[idx + 1] ||
-        !grid[idx - width] || !grid[idx + width]
-      ) {
-        edge[idx] = 1;
+  // Edge-point ID layout:
+  //   Horizontal edges: id = ey * cellsW + ex   (ey ∈ [0,h), ex ∈ [0,cellsW))
+  //   Vertical edges:   id = hCount + ey * w + ex (ey ∈ [0,cellsH), ex ∈ [0,w))
+  const hCount = h * cellsW;
+  const totalEdges = hCount + cellsH * w;
+
+  // Adjacency — each edge point connects to at most 2 others.
+  const link1 = new Int32Array(totalEdges).fill(-1);
+  const link2 = new Int32Array(totalEdges).fill(-1);
+
+  for (let cy = 0; cy < cellsH; cy++) {
+    const rowOff = cy * w;
+    const nextRowOff = rowOff + w;
+
+    // Pre-compute the 4 base edge IDs that only depend on the row.
+    const hTop = cy * cellsW;             // + cx for edge 0
+    const hBot = (cy + 1) * cellsW;       // + cx for edge 2
+    const vRow = hCount + cy * w;          // + cx for edge 3, + (cx+1) for edge 1
+
+    for (let cx = 0; cx < cellsW; cx++) {
+      const caseIdx =
+        grid[rowOff + cx] |
+        (grid[rowOff + cx + 1] << 1) |
+        (grid[nextRowOff + cx + 1] << 2) |
+        (grid[nextRowOff + cx] << 3);
+
+      const off = caseIdx * 5;
+      const count = CASE_TABLE[off];
+      if (count === 0) continue;
+
+      // Resolve edge index → global edge-point ID (inlined, no function call).
+      const edgeIds0 = hTop + cx;          // edge 0 (top)
+      const edgeIds1 = vRow + cx + 1;      // edge 1 (right)
+      const edgeIds2 = hBot + cx;          // edge 2 (bottom)
+      const edgeIds3 = vRow + cx;          // edge 3 (left)
+
+      const resolve = (e: number) =>
+        e === 0 ? edgeIds0 : e === 1 ? edgeIds1 : e === 2 ? edgeIds2 : edgeIds3;
+
+      const a = resolve(CASE_TABLE[off + 1]);
+      const b = resolve(CASE_TABLE[off + 2]);
+      if (link1[a] === -1) link1[a] = b; else link2[a] = b;
+      if (link1[b] === -1) link1[b] = a; else link2[b] = a;
+
+      if (count === 2) {
+        const c = resolve(CASE_TABLE[off + 3]);
+        const d = resolve(CASE_TABLE[off + 4]);
+        if (link1[c] === -1) link1[c] = d; else link2[c] = d;
+        if (link1[d] === -1) link1[d] = c; else link2[d] = c;
       }
     }
-    if (y % 50 === 0) report(0.15 + 0.15 * (y / height), "Detecting edges…");
+
+    if (cy % 40 === 0) report(0.15 + 0.45 * (cy / cellsH), "Tracing contours…");
   }
 
-  const visited = new Uint8Array(n);
+  report(0.60, "Building contours…");
+
+  // Chain linked edge points into closed contours.
+  const visited = new Uint8Array(totalEdges);
   const contours: Point[][] = [];
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      if (!edge[idx] || visited[idx]) continue;
+  for (let start = 0; start < totalEdges; start++) {
+    if (visited[start] || link1[start] === -1) continue;
 
-      const contour = followContour(edge, width, height, x, y, visited);
-      if (contour.length >= 3) {
-        contours.push(contour);
+    const ids: number[] = [start];
+    visited[start] = 1;
+
+    let cur = link1[start];
+    let prev = start;
+
+    while (cur !== -1 && cur !== start && !visited[cur]) {
+      ids.push(cur);
+      visited[cur] = 1;
+      const next = link1[cur] === prev ? link2[cur] : link1[cur];
+      prev = cur;
+      cur = next;
+    }
+
+    if (ids.length < 3) continue;
+
+    const points: Point[] = new Array(ids.length);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (id < hCount) {
+        const ey = (id / cellsW) | 0;
+        const ex = id - ey * cellsW;
+        points[i] = { x: ex + 0.5, y: ey };
+      } else {
+        const vid = id - hCount;
+        const ey = (vid / w) | 0;
+        const ex = vid - ey * w;
+        points[i] = { x: ex, y: ey + 0.5 };
       }
     }
-    if (y % 50 === 0) report(0.30 + 0.40 * (y / height), "Tracing contours…");
+    contours.push(points);
   }
 
   return contours;
@@ -171,7 +215,7 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     if (y % 50 === 0) report(0.15 * (y / height), "Building pixel grid…");
   }
 
-  let contours = traceContours(grid, width, height, report);
+  let contours = marchingSquares(grid, width, height, report);
 
   report(0.70, "Simplifying…");
 
