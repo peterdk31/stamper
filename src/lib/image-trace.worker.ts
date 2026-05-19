@@ -54,24 +54,16 @@ export type TraceMessage =
   | { type: "progress"; progress: number; stage: string }
   | { type: "result"; contours: Point[][] };
 
-const DIRECTIONS = [
-  { dx: 1, dy: 0 },
-  { dx: 1, dy: 1 },
-  { dx: 0, dy: 1 },
-  { dx: -1, dy: 1 },
-  { dx: -1, dy: 0 },
-  { dx: -1, dy: -1 },
-  { dx: 0, dy: -1 },
-  { dx: 1, dy: -1 },
-];
+const DX = [1, 1, 0, -1, -1, -1, 0, 1];
+const DY = [0, 1, 1, 1, 0, -1, -1, -1];
 
 function followContour(
-  grid: boolean[],
+  edge: Uint8Array,
   width: number,
   height: number,
   startX: number,
   startY: number,
-  visited: Set<string>,
+  visited: Uint8Array,
 ): Point[] {
   const contour: Point[] = [];
   let x = startX;
@@ -79,29 +71,20 @@ function followContour(
   let dir = 0;
 
   do {
-    const key = `${x},${y}`;
-    if (!visited.has(key)) {
-      visited.add(key);
+    const idx = y * width + x;
+    if (!visited[idx]) {
+      visited[idx] = 1;
       contour.push({ x, y });
     }
 
     let found = false;
-    for (let i = 0; i < DIRECTIONS.length; i++) {
-      const tryDir = (dir + DIRECTIONS.length - 1 + i) % DIRECTIONS.length;
-      const nx = x + DIRECTIONS[tryDir].dx;
-      const ny = y + DIRECTIONS[tryDir].dy;
+    for (let i = 0; i < 8; i++) {
+      const tryDir = (dir + 7 + i) & 7;
+      const nx = x + DX[tryDir];
+      const ny = y + DY[tryDir];
 
       if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-      if (!grid[ny * width + nx]) continue;
-
-      const isEdge =
-        nx === 0 || ny === 0 || nx === width - 1 || ny === height - 1 ||
-        !grid[ny * width + (nx - 1)] ||
-        !grid[ny * width + (nx + 1)] ||
-        !grid[(ny - 1) * width + nx] ||
-        !grid[(ny + 1) * width + nx];
-
-      if (!isEdge) continue;
+      if (!edge[ny * width + nx]) continue;
 
       x = nx;
       y = ny;
@@ -116,31 +99,46 @@ function followContour(
   return contour;
 }
 
-function traceContours(grid: boolean[], width: number, height: number): Point[][] {
-  const visited = new Set<string>();
+type ProgressFn = (progress: number, stage: string) => void;
+
+function traceContours(
+  grid: Uint8Array,
+  width: number,
+  height: number,
+  report: ProgressFn,
+): Point[][] {
+  const n = width * height;
+  const edge = new Uint8Array(n);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (!grid[idx]) continue;
+      if (
+        x === 0 || y === 0 || x === width - 1 || y === height - 1 ||
+        !grid[idx - 1] || !grid[idx + 1] ||
+        !grid[idx - width] || !grid[idx + width]
+      ) {
+        edge[idx] = 1;
+      }
+    }
+    if (y % 50 === 0) report(0.15 + 0.15 * (y / height), "Detecting edges…");
+  }
+
+  const visited = new Uint8Array(n);
   const contours: Point[][] = [];
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (!grid[y * width + x]) continue;
+      const idx = y * width + x;
+      if (!edge[idx] || visited[idx]) continue;
 
-      const isEdge =
-        x === 0 || y === 0 || x === width - 1 || y === height - 1 ||
-        !grid[y * width + (x - 1)] ||
-        !grid[y * width + (x + 1)] ||
-        !grid[(y - 1) * width + x] ||
-        !grid[(y + 1) * width + x];
-
-      if (!isEdge) continue;
-
-      const key = `${x},${y}`;
-      if (visited.has(key)) continue;
-
-      const contour = followContour(grid, width, height, x, y, visited);
+      const contour = followContour(edge, width, height, x, y, visited);
       if (contour.length >= 3) {
         contours.push(contour);
       }
     }
+    if (y % 50 === 0) report(0.30 + 0.40 * (y / height), "Tracing contours…");
   }
 
   return contours;
@@ -149,32 +147,47 @@ function traceContours(grid: boolean[], width: number, height: number): Point[][
 self.onmessage = (e: MessageEvent<TraceRequest>) => {
   const { width, height, data, targetWidth, targetHeight, simplification, threshold } = e.data;
 
-  const ctx = self as unknown as Worker;
+  const post = self.postMessage.bind(self);
+  let lastReported = -1;
+  const report: ProgressFn = (progress, stage) => {
+    const rounded = Math.round(progress * 100);
+    if (rounded === lastReported) return;
+    lastReported = rounded;
+    post({ type: "progress", progress, stage } satisfies TraceMessage);
+  };
 
-  ctx.postMessage({ type: "progress", progress: 0.1, stage: "Building pixel grid…" });
+  report(0, "Building pixel grid…");
 
-  const grid: boolean[] = new Array(width * height);
-  for (let i = 0; i < width * height; i++) {
-    const r = data[i * 4];
-    const g = data[i * 4 + 1];
-    const b = data[i * 4 + 2];
-    const a = data[i * 4 + 3];
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    grid[i] = a > 128 && luminance < threshold;
+  const n = width * height;
+  const grid = new Uint8Array(n);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width;
+    const dataRowStart = rowStart * 4;
+    for (let x = 0; x < width; x++) {
+      const off = dataRowStart + x * 4;
+      const luminance = 0.299 * data[off] + 0.587 * data[off + 1] + 0.114 * data[off + 2];
+      grid[rowStart + x] = (data[off + 3] > 128 && luminance < threshold) ? 1 : 0;
+    }
+    if (y % 50 === 0) report(0.15 * (y / height), "Building pixel grid…");
   }
 
-  ctx.postMessage({ type: "progress", progress: 0.3, stage: "Tracing contours…" });
+  let contours = traceContours(grid, width, height, report);
 
-  let contours = traceContours(grid, width, height);
+  report(0.70, "Simplifying…");
 
-  ctx.postMessage({ type: "progress", progress: 0.7, stage: "Simplifying…" });
-
-  if (simplification > 0) {
+  if (simplification > 0 && contours.length > 0) {
     const tolerance = simplification * 5;
-    contours = contours
-      .map((c) => simplifyContour(c, tolerance))
-      .filter((c) => c.length >= 3);
+    const total = contours.length;
+    const simplified: Point[][] = [];
+    for (let i = 0; i < total; i++) {
+      const s = simplifyContour(contours[i], tolerance);
+      if (s.length >= 3) simplified.push(s);
+      if (i % 20 === 0) report(0.70 + 0.20 * (i / total), "Simplifying…");
+    }
+    contours = simplified;
   }
+
+  report(0.90, "Scaling…");
 
   const scaleX = targetWidth / width;
   const scaleY = targetHeight / height;
@@ -182,5 +195,5 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     contour.map((p) => ({ x: p.x * scaleX, y: (height - p.y) * scaleY })),
   );
 
-  ctx.postMessage({ type: "result", contours: scaledContours });
+  post({ type: "result", contours: scaledContours } satisfies TraceMessage);
 };

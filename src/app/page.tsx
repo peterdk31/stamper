@@ -90,12 +90,17 @@ export default function Home() {
       img.onload = () => {
         setImageAspectRatio(img.width / img.height);
 
+        const MAX_TRACE_DIM = 800;
+        const scale = Math.min(1, MAX_TRACE_DIM / Math.max(img.width, img.height));
+        const tw = Math.round(img.width * scale);
+        const th = Math.round(img.height * scale);
+
         const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
+        canvas.width = tw;
+        canvas.height = th;
         const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+        ctx.drawImage(img, 0, 0, tw, th);
+        const imageData = ctx.getImageData(0, 0, tw, th);
 
         terminateWorker();
         setIsTracing(true);
