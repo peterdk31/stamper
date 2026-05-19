@@ -55,16 +55,43 @@ export function buildStampGeometry(
   const totalHeight = settings.baseThickness + settings.impressionDepth;
   const isRaised = settings.designMode === "raised";
 
-  const baseShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
-
   const baseDepth = isRaised ? settings.baseThickness : totalHeight;
-  const baseGeo = new THREE.ExtrudeGeometry(baseShape, {
-    depth: baseDepth,
-    bevelEnabled: false,
-  });
   const baseMat = new THREE.MeshStandardMaterial({ color: 0xd4a373 });
-  const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-  group.add(baseMesh);
+
+  if (settings.threadEnabled) {
+    const majorR = settings.threadConfig.majorDiameter / 2;
+    const threadDepth = Math.min(settings.threadConfig.height, baseDepth);
+
+    const holedShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+    const holePath = new THREE.Path();
+    holePath.absarc(settings.width / 2, settings.height / 2, majorR, 0, Math.PI * 2, true);
+    holedShape.holes.push(holePath);
+
+    const backGeo = new THREE.ExtrudeGeometry(holedShape, {
+      depth: threadDepth,
+      bevelEnabled: false,
+      curveSegments: settings.threadConfig.segments,
+    });
+    group.add(new THREE.Mesh(backGeo, baseMat));
+
+    if (threadDepth < baseDepth) {
+      const frontShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+      const frontGeo = new THREE.ExtrudeGeometry(frontShape, {
+        depth: baseDepth - threadDepth,
+        bevelEnabled: false,
+      });
+      const frontMesh = new THREE.Mesh(frontGeo, baseMat);
+      frontMesh.position.z = threadDepth;
+      group.add(frontMesh);
+    }
+  } else {
+    const baseShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+    const baseGeo = new THREE.ExtrudeGeometry(baseShape, {
+      depth: baseDepth,
+      bevelEnabled: false,
+    });
+    group.add(new THREE.Mesh(baseGeo, baseMat));
+  }
 
   const allShapes = [...designShapes, ...textShapes];
   if (allShapes.length > 0) {

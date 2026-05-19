@@ -17,6 +17,8 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
     onChange({ ...settings, ...partial });
   }
 
+  const maxThreadHeight = Math.max(settings.baseThickness - 2, 2);
+
   function updateThread(partial: Partial<ThreadConfig>) {
     onChange({ ...settings, threadConfig: { ...settings.threadConfig, ...partial } });
   }
@@ -50,7 +52,11 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
         onChange={(v) => update({ height: v, autoSize: false })}
         disabled={settings.autoSize} />
       <SliderInput label="Base Thickness" unit="mm" value={settings.baseThickness} min={1} max={20} step={0.5}
-        onChange={(v) => update({ baseThickness: v })} />
+        onChange={(v) => {
+          const newMax = Math.max(v - 2, 2);
+          const clampedThread = Math.min(settings.threadConfig.height, newMax);
+          update({ baseThickness: v, threadConfig: { ...settings.threadConfig, height: clampedThread } });
+        }} />
       <SliderInput label="Impression Depth" unit="mm" value={settings.impressionDepth} min={0.2} max={10} step={0.1}
         onChange={(v) => update({ impressionDepth: v })} />
       <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
@@ -96,8 +102,8 @@ export default function StampSettingsPanel({ settings, onChange }: Props) {
             <SliderInput label="Tolerance" unit="mm" value={settings.threadConfig.tolerance}
               min={0} max={1.5} step={0.05}
               onChange={(v) => updateThread({ tolerance: v })} />
-            <SliderInput label="Thread Height" unit="mm" value={settings.threadConfig.height}
-              min={4} max={20} step={0.5} onChange={(v) => updateThread({ height: v })} />
+            <SliderInput label="Thread Height" unit="mm" value={Math.min(settings.threadConfig.height, maxThreadHeight)}
+              min={4} max={maxThreadHeight} step={0.5} onChange={(v) => updateThread({ height: v })} />
           </div>
         )}
       </div>

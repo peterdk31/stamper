@@ -46,7 +46,6 @@ export interface TraceRequest {
   data: Uint8ClampedArray;
   targetWidth: number;
   targetHeight: number;
-  simplification: number;
   threshold: number;
 }
 
@@ -189,7 +188,7 @@ function marchingSquares(
 }
 
 self.onmessage = (e: MessageEvent<TraceRequest>) => {
-  const { width, height, data, targetWidth, targetHeight, simplification, threshold } = e.data;
+  const { width, height, data, targetWidth, targetHeight, threshold } = e.data;
 
   const post = self.postMessage.bind(self);
   let lastReported = -1;
@@ -219,12 +218,13 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
 
   report(0.70, "Simplifying…");
 
-  if (simplification > 0 && contours.length > 0) {
-    const tolerance = simplification * 5;
+  // Fixed tolerance of 1.0 pixel: collapses marching-squares staircases
+  // (which deviate ~0.7px from ideal lines) while preserving curves.
+  if (contours.length > 0) {
     const total = contours.length;
     const simplified: Point[][] = [];
     for (let i = 0; i < total; i++) {
-      const s = simplifyContour(contours[i], tolerance);
+      const s = simplifyContour(contours[i], 0.5);
       if (s.length >= 3) simplified.push(s);
       if (i % 20 === 0) report(0.70 + 0.20 * (i / total), "Simplifying…");
     }

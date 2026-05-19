@@ -9,8 +9,8 @@ export interface ThreadConfig {
 export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
   majorDiameter: 10,
   pitch: 1.5,
-  height: 8,
-  tolerance: 0.4,
+  height: 4,
+  tolerance: 0.1,
   segments: 48,
 };
 
@@ -40,7 +40,7 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   padding: 4,
   designMode: "raised",
   simplification: 0.5,
-  threadEnabled: false,
+  threadEnabled: true,
   threadConfig: { ...DEFAULT_THREAD_CONFIG },
 };
 

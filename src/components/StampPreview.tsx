@@ -13,9 +13,10 @@ interface Props {
   settings: StampSettings;
   designShapes: THREE.Shape[];
   textShapes: THREE.Shape[];
+  exportName: string;
 }
 
-export default function StampPreview({ settings, designShapes, textShapes }: Props) {
+export default function StampPreview({ settings, designShapes, textShapes, exportName }: Props) {
   const stampRef = useRef<THREE.Group>(null);
 
   const stampGroup = useMemo(
@@ -26,28 +27,31 @@ export default function StampPreview({ settings, designShapes, textShapes }: Pro
   const handleGroup = useMemo(() => {
     if (!settings.threadEnabled) return null;
     const handle = createHandle(settings.threadConfig);
-    handle.position.set(settings.width / 2, settings.height / 2, settings.threadConfig.height);
+    const gap = 15;
+    const handleHeight = settings.threadConfig.height + 18;
+    handle.position.set(settings.width + gap + settings.threadConfig.majorDiameter * 1.2, settings.height / 2, handleHeight);
     handle.rotation.x = Math.PI;
     return handle;
   }, [settings.threadEnabled, settings.threadConfig, settings.width, settings.height]);
 
-  const center = useMemo(
-    () => new THREE.Vector3(
-      settings.width / 2,
-      settings.height / 2,
-      (settings.baseThickness + settings.impressionDepth) / 2,
-    ),
-    [settings],
-  );
+  const center = useMemo(() => {
+    const stampCenterX = settings.width / 2;
+    const centerZ = (settings.baseThickness + settings.impressionDepth) / 2;
+    if (settings.threadEnabled) {
+      const handleX = settings.width + 15 + settings.threadConfig.majorDiameter * 1.2;
+      return new THREE.Vector3((stampCenterX + handleX) / 2, settings.height / 2, centerZ);
+    }
+    return new THREE.Vector3(stampCenterX, settings.height / 2, centerZ);
+  }, [settings]);
 
   function handleExportStamp() {
     if (!stampRef.current) return;
-    downloadSTL(stampRef.current, "ceramic-stamp.stl");
+    downloadSTL(stampRef.current, `${exportName}-stamp.stl`);
   }
 
   function handleExportHandle() {
     const handle = createHandle(settings.threadConfig);
-    downloadSTL(handle, "handle-knob.stl");
+    downloadSTL(handle, `${exportName}-handle.stl`);
   }
 
   return (

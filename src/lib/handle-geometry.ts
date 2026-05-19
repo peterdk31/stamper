@@ -9,7 +9,7 @@ export function createHandle(threadConfig: ThreadConfig): THREE.Group {
   const group = createHandleBody(threadConfig);
 
   const threadGeo = createMaleThreadGeometry(threadConfig);
-  const threadMat = new THREE.MeshStandardMaterial({ color: THREAD_COLOR });
+  const threadMat = new THREE.MeshStandardMaterial({ color: THREAD_COLOR, side: THREE.DoubleSide });
   const threadMesh = new THREE.Mesh(threadGeo, threadMat);
   group.add(threadMesh);
 

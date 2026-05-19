@@ -18,6 +18,7 @@ const StampPreview = dynamic(() => import("@/components/StampPreview"), { ssr: f
 export default function Home() {
   const [settings, setSettings] = useState<StampSettings>(DEFAULT_STAMP_SETTINGS);
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  const [imageName, setImageName] = useState<string | null>(null);
   const [svgText, setSvgText] = useState<string | null>(null);
   const [texts, setTexts] = useState<StampText[]>([]);
   const [designShapes, setDesignShapes] = useState<THREE.Shape[]>([]);
@@ -172,16 +173,29 @@ export default function Home() {
       data: loadedPixels.data,
       targetWidth: effectiveSettings.width,
       targetHeight: effectiveSettings.height,
-      simplification: effectiveSettings.simplification,
       threshold: 128,
     };
     worker.postMessage(req);
-  }, [svgText, loadedPixels, imageDataUrl, effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, terminateWorker]);
+  }, [svgText, loadedPixels, imageDataUrl, effectiveSettings.width, effectiveSettings.height, terminateWorker]);
 
   const textShapes = useMemo(() => {
     if (!fontsReady) return [];
     return textEntriesToShapes(texts, getFontCache(), effectiveSettings.width, effectiveSettings.height, 0, effectiveSettings.padding);
   }, [texts, fontsReady, effectiveSettings.width, effectiveSettings.height, effectiveSettings.padding]);
+
+  const handleImageChange = useCallback((dataUrl: string | null, fileName?: string) => {
+    setImageDataUrl(dataUrl);
+    setImageName(dataUrl ? (fileName ?? null) : null);
+  }, []);
+
+  const exportName = useMemo(() => {
+    const parts: string[] = [];
+    if (imageName) parts.push(imageName);
+    const textContent = texts.map((t) => t.content.trim()).filter(Boolean).join("-");
+    if (textContent) parts.push(textContent);
+    if (parts.length === 0) return "stamp";
+    return parts.join("-").replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+  }, [imageName, texts]);
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -195,10 +209,8 @@ export default function Home() {
           <ImageUpload
             imageDataUrl={imageDataUrl}
             svgText={svgText}
-            simplification={effectiveSettings.simplification}
-            onImageChange={setImageDataUrl}
+            onImageChange={handleImageChange}
             onSvgChange={setSvgText}
-            onSimplificationChange={(v) => setSettings((s) => ({ ...s, simplification: v }))}
             isProcessing={isTracing}
             progress={traceProgress}
             progressStage={traceStage}
@@ -215,7 +227,7 @@ export default function Home() {
         </aside>
 
         <section>
-          <StampPreview settings={effectiveSettings} designShapes={designShapes} textShapes={textShapes} />
+          <StampPreview settings={effectiveSettings} designShapes={designShapes} textShapes={textShapes} exportName={exportName} />
         </section>
       </div>
     </main>

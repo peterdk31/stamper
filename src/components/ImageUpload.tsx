@@ -5,18 +5,16 @@ import { useCallback, useRef } from "react";
 interface Props {
   imageDataUrl: string | null;
   svgText: string | null;
-  simplification: number;
-  onImageChange: (dataUrl: string | null) => void;
+  onImageChange: (dataUrl: string | null, fileName?: string) => void;
   onSvgChange: (svgText: string | null) => void;
-  onSimplificationChange: (value: number) => void;
   isProcessing?: boolean;
   progress?: number;
   progressStage?: string;
 }
 
 export default function ImageUpload({
-  imageDataUrl, svgText, simplification,
-  onImageChange, onSvgChange, onSimplificationChange,
+  imageDataUrl, svgText,
+  onImageChange, onSvgChange,
   isProcessing, progress = 0, progressStage = "",
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -24,6 +22,7 @@ export default function ImageUpload({
 
   const handleFile = useCallback(
     (file: File) => {
+      const baseName = file.name.replace(/\.[^.]+$/, "");
       if (file.type === "image/svg+xml" || file.name.endsWith(".svg")) {
         const reader = new FileReader();
         reader.onload = () => {
@@ -34,7 +33,7 @@ export default function ImageUpload({
       } else if (file.type.startsWith("image/")) {
         const reader = new FileReader();
         reader.onload = () => {
-          onImageChange(reader.result as string);
+          onImageChange(reader.result as string, baseName);
           onSvgChange(null);
         };
         reader.readAsDataURL(file);
@@ -109,27 +108,6 @@ export default function ImageUpload({
           if (file) handleFile(file);
         }}
       />
-
-      {imageDataUrl && !isSvg && !isProcessing && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Simplification: {simplification.toFixed(2)}
-          </label>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={simplification}
-            onChange={(e) => onSimplificationChange(Number(e.target.value))}
-            className="mt-1 w-full"
-          />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>Detailed</span>
-            <span>Simplified</span>
-          </div>
-        </div>
-      )}
 
       {hasContent && !isProcessing && (
         <button

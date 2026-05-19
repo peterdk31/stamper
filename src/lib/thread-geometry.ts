@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import type { ThreadConfig } from "@/types/stamp";
 
-const STEPS_PER_PITCH = 16;
-const WALL_THICKNESS = 2;
+const STEPS_PER_PITCH = 32;
+const WALL_OVERLAP = 2;
 
 function isoMetricDimensions(majorDiameter: number, pitch: number) {
   const H = (Math.sqrt(3) / 2) * pitch;
@@ -33,7 +33,7 @@ function threadProfile(phase: number): number {
 export function createFemaleThreadGeometry(config: ThreadConfig): THREE.BufferGeometry {
   const { majorDiameter, pitch, height, segments } = config;
   const { threadDepth, majorR } = isoMetricDimensions(majorDiameter, pitch);
-  const outerWallR = majorR + WALL_THICKNESS;
+  const outerR = majorR + WALL_OVERLAP;
   const revolutions = height / pitch;
   const totalZSteps = Math.ceil(revolutions * STEPS_PER_PITCH);
 
@@ -42,15 +42,15 @@ export function createFemaleThreadGeometry(config: ThreadConfig): THREE.BufferGe
 
   for (let i = 0; i <= totalZSteps; i++) {
     const z = (i / totalZSteps) * height;
-
     for (let j = 0; j <= segments; j++) {
       const circumAngle = (j / segments) * Math.PI * 2;
       const helixPhase = z / pitch + circumAngle / (Math.PI * 2);
       const profile = threadProfile(helixPhase);
-      const r = majorR - profile * threadDepth;
-
+      const distFromEntry = height - z;
+      const taper = Math.min(distFromEntry / pitch, 1);
+      const r = majorR - profile * threadDepth * taper;
       vertices.push(Math.cos(circumAngle) * r, Math.sin(circumAngle) * r, z);
-      vertices.push(Math.cos(circumAngle) * outerWallR, Math.sin(circumAngle) * outerWallR, z);
+      vertices.push(Math.cos(circumAngle) * outerR, Math.sin(circumAngle) * outerR, z);
     }
   }
 
@@ -72,20 +72,10 @@ export function createFemaleThreadGeometry(config: ThreadConfig): THREE.BufferGe
   vertices.push(0, 0, 0);
   for (let j = 0; j <= segments; j++) {
     const segAngle = (j / segments) * Math.PI * 2;
-    vertices.push(Math.cos(segAngle) * outerWallR, Math.sin(segAngle) * outerWallR, 0);
+    vertices.push(Math.cos(segAngle) * outerR, Math.sin(segAngle) * outerR, 0);
   }
   for (let j = 0; j < segments; j++) {
     indices.push(bottomCenter, bottomCenter + 1 + ((j + 1) % (segments + 1)), bottomCenter + 1 + j);
-  }
-
-  const topCenter = vertices.length / 3;
-  vertices.push(0, 0, height);
-  for (let j = 0; j <= segments; j++) {
-    const segAngle = (j / segments) * Math.PI * 2;
-    vertices.push(Math.cos(segAngle) * outerWallR, Math.sin(segAngle) * outerWallR, height);
-  }
-  for (let j = 0; j < segments; j++) {
-    indices.push(topCenter, topCenter + 1 + j, topCenter + 1 + ((j + 1) % (segments + 1)));
   }
 
   const geo = new THREE.BufferGeometry();
@@ -99,7 +89,7 @@ export function createMaleThreadGeometry(config: ThreadConfig): THREE.BufferGeom
   const { majorDiameter, pitch, height, tolerance, segments } = config;
   const { threadDepth, minorR } = isoMetricDimensions(majorDiameter, pitch);
   const effectiveMinorR = minorR - tolerance;
-  const coreR = Math.max(effectiveMinorR - 1, 1);
+  const coreR = effectiveMinorR;
   const revolutions = height / pitch;
   const totalZSteps = Math.ceil(revolutions * STEPS_PER_PITCH);
 
@@ -108,13 +98,12 @@ export function createMaleThreadGeometry(config: ThreadConfig): THREE.BufferGeom
 
   for (let i = 0; i <= totalZSteps; i++) {
     const z = (i / totalZSteps) * height;
-
     for (let j = 0; j <= segments; j++) {
       const circumAngle = (j / segments) * Math.PI * 2;
       const helixPhase = z / pitch + circumAngle / (Math.PI * 2);
       const profile = threadProfile(helixPhase);
-      const r = effectiveMinorR + profile * threadDepth;
-
+      const taper = Math.min(z / pitch, 1);
+      const r = effectiveMinorR + profile * threadDepth * taper;
       vertices.push(Math.cos(circumAngle) * r, Math.sin(circumAngle) * r, z);
       vertices.push(Math.cos(circumAngle) * coreR, Math.sin(circumAngle) * coreR, z);
     }
@@ -138,10 +127,7 @@ export function createMaleThreadGeometry(config: ThreadConfig): THREE.BufferGeom
   vertices.push(0, 0, 0);
   for (let j = 0; j <= segments; j++) {
     const circumAngle = (j / segments) * Math.PI * 2;
-    const helixPhase = circumAngle / (Math.PI * 2);
-    const profile = threadProfile(helixPhase);
-    const r = effectiveMinorR + profile * threadDepth;
-    vertices.push(Math.cos(circumAngle) * r, Math.sin(circumAngle) * r, 0);
+    vertices.push(Math.cos(circumAngle) * effectiveMinorR, Math.sin(circumAngle) * effectiveMinorR, 0);
   }
   for (let j = 0; j < segments; j++) {
     indices.push(bottomCenter, bottomCenter + 1 + j, bottomCenter + 1 + ((j + 1) % (segments + 1)));

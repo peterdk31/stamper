@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 export function exportSTL(mesh: THREE.Mesh | THREE.Group): Blob {
+  mesh.updateMatrixWorld(true);
   const triangles: { vertices: THREE.Vector3[]; normal: THREE.Vector3 }[] = [];
 
   mesh.traverse((child) => {
