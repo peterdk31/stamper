@@ -1,7 +1,12 @@
 import type { Font } from "three/examples/jsm/loaders/FontLoader.js";
 import type { StampText, DesignData } from "@/types/stamp";
-import { textEntriesToShapes } from "@/lib/text-to-shapes";
+import { computeTextLayout, renderTextPlacements } from "@/lib/text-to-shapes";
 import { shapesToDesignData, computeBounds } from "@/lib/design-data";
+
+export interface TextLayoutOutput {
+  textData: DesignData | null;
+  imageZone: { yMin: number; yMax: number };
+}
 
 export function textToDesignData(
   texts: StampText[],
@@ -9,13 +14,29 @@ export function textToDesignData(
   stampWidth: number,
   stampHeight: number,
   padding: number,
-): DesignData | null {
-  const shapes = textEntriesToShapes(texts, fontCache, stampWidth, stampHeight, 0, padding);
-  if (shapes.length === 0) return null;
+  hasImage: boolean,
+): TextLayoutOutput {
+  const layout = computeTextLayout(texts, fontCache, stampWidth, stampHeight, padding, hasImage);
+
+  if (layout.placements.length === 0) {
+    return {
+      textData: null,
+      imageZone: layout.imageZone,
+    };
+  }
+
+  const shapes = renderTextPlacements(layout.placements, stampWidth);
+  if (shapes.length === 0) {
+    return { textData: null, imageZone: layout.imageZone };
+  }
+
   const shapeData = shapesToDesignData(shapes);
   return {
-    shapes: shapeData,
-    bounds: computeBounds(shapeData),
-    sourceAspectRatio: null,
+    textData: {
+      shapes: shapeData,
+      bounds: computeBounds(shapeData),
+      sourceAspectRatio: null,
+    },
+    imageZone: layout.imageZone,
   };
 }

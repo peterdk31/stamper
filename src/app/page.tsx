@@ -7,6 +7,7 @@ import { loadAllBundledFonts, type FontEntry } from "@/lib/font-manager";
 import StampSettingsPanel from "@/components/StampSettingsPanel";
 import ImageUpload from "@/components/ImageUpload";
 import TextEditor from "@/components/TextEditor";
+import PipelineToast from "@/components/PipelineToast";
 import { useStampPipeline } from "@/hooks/useStampPipeline";
 
 const StampPreview = dynamic(() => import("@/components/StampPreview"), { ssr: false });
@@ -19,8 +20,8 @@ export default function Home() {
   const [texts, setTexts] = useState<StampText[]>([]);
   const [availableFonts, setAvailableFonts] = useState<string[]>([]);
   const [fontsReady, setFontsReady] = useState(false);
-  const [thickenEnabled, setThickenEnabled] = useState(false);
-  const [smoothEnabled, setSmoothEnabled] = useState(false);
+  const [thickenEnabled, setThickenEnabled] = useState(true);
+  const [smoothEnabled, setSmoothEnabled] = useState(true);
 
   useEffect(() => {
     loadAllBundledFonts().then((entries) => {
@@ -67,7 +68,18 @@ export default function Home() {
         <p className="text-amber-200 text-sm">Design and export 3D-printable ceramic stamps</p>
       </header>
 
-      <div className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
+      <PipelineToast
+        isProcessing={pipeline.isProcessing}
+        pipelineProgress={pipeline.pipelineProgress}
+        pipelineStage={pipeline.pipelineStage}
+        isAutoFitting={pipeline.isAutoFitting}
+      />
+
+      <div className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        <section>
+          <StampPreview settings={pipeline.effectiveSettings} shapes={pipeline.shapes} exportName={exportName} />
+        </section>
+
         <aside className="space-y-4">
           <ImageUpload
             imageDataUrl={imageDataUrl}
@@ -81,28 +93,21 @@ export default function Home() {
           <TextEditor
             texts={texts}
             availableFonts={availableFonts}
-            stampWidth={pipeline.effectiveSettings.width}
-            stampHeight={pipeline.effectiveSettings.height}
+            hasImage={!!(imageDataUrl || svgText)}
             onChange={setTexts}
             onFontLoaded={handleFontLoaded}
           />
           <StampSettingsPanel settings={pipeline.effectiveSettings} onChange={setSettings}
-            isAutoFitting={pipeline.isAutoFitting}
             thickenEnabled={thickenEnabled}
             isThickening={pipeline.isThickening}
             smoothEnabled={smoothEnabled}
             isSmoothing={pipeline.isSmoothing}
-            smoothProgress={pipeline.smoothProgress}
             hasDesign={pipeline.hasDesign}
             onThickenToggle={() => setThickenEnabled((v) => !v)}
             onSmoothToggle={() => setSmoothEnabled((v) => !v)}
             onFindMinWidth={pipeline.onFindMinWidth}
           />
         </aside>
-
-        <section>
-          <StampPreview settings={pipeline.effectiveSettings} shapes={pipeline.shapes} exportName={exportName} />
-        </section>
       </div>
     </main>
   );

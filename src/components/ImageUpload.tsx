@@ -72,10 +72,17 @@ export default function ImageUpload({
             : "border-gray-300 cursor-pointer hover:border-amber-500"
         }`}
       >
-        {imageDataUrl ? (
+        {imageDataUrl || svgText ? (
           <div className="relative">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageDataUrl} alt="Uploaded outline" className="mx-auto max-h-40 object-contain" />
+            {imageDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageDataUrl} alt="Uploaded outline" className="mx-auto max-h-40 object-contain" />
+            ) : (
+              <div
+                className="mx-auto max-h-40 overflow-hidden [&>svg]:max-h-40 [&>svg]:mx-auto [&>svg]:block"
+                dangerouslySetInnerHTML={{ __html: svgText! }}
+              />
+            )}
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-white/70">
                 <div className="h-6 w-6 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -96,8 +103,6 @@ export default function ImageUpload({
             </div>
             <p className="text-xs text-gray-400">{Math.round(progress * 100)}%</p>
           </div>
-        ) : isSvg ? (
-          <p className="text-sm text-gray-700">SVG loaded</p>
         ) : (
           <p className="text-gray-500 text-sm">
             Drop an image or SVG here, or click to upload

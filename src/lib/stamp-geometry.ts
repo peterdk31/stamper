@@ -1,10 +1,6 @@
 import * as THREE from "three";
 import type { StampSettings } from "@/types/stamp";
 import { createFemaleThreadGeometry } from "./thread-geometry";
-import {
-  computeThinFeatureMap,
-  type ThinFeatureMap,
-} from "./thin-feature-detect";
 
 export function createRoundedRectShape(
   width: number,
@@ -100,37 +96,21 @@ export function buildStampGeometry(
   if (allShapes.length > 0) {
     const mirrored = mirrorShapes(allShapes, settings.width);
 
-    let thinMap: ThinFeatureMap | null = null;
-    if (settings.nozzleDiameter > 0) {
-      thinMap = computeThinFeatureMap(
-        mirrored,
-        settings.width,
-        settings.height,
-        settings.nozzleDiameter,
-      );
-    }
-
     const normalColor = isRaised ? 0x8b5e3c : 0x6b4226;
     const geo = new THREE.ExtrudeGeometry(mirrored, {
       depth: settings.impressionDepth,
       bevelEnabled: false,
     });
 
-    let mat: THREE.MeshStandardMaterial;
-    if (thinMap?.hasThinFeatures) {
-      remapUVsToStamp(geo, settings.width, settings.height);
-      const tex = createThinFeatureTexture(thinMap, normalColor);
-      mat = new THREE.MeshStandardMaterial({ map: tex });
-    } else {
-      mat = new THREE.MeshStandardMaterial({ color: normalColor });
-    }
-
+    const mat = new THREE.MeshStandardMaterial({ color: normalColor });
     const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = "design";
     const z = isRaised ? settings.baseThickness : totalHeight - settings.impressionDepth;
     mesh.position.set(0, 0, z);
     group.add(mesh);
 
-    group.userData.hasThinFeatures = thinMap?.hasThinFeatures ?? false;
+    group.userData.hasThinFeatures = false;
+    group.userData.normalColor = normalColor;
   }
 
   if (settings.threadEnabled) {
@@ -148,47 +128,3 @@ export function buildStampGeometry(
   return group;
 }
 
-function remapUVsToStamp(
-  geo: THREE.BufferGeometry,
-  stampWidth: number,
-  stampHeight: number,
-): void {
-  const positions = geo.attributes.position;
-  const uvs = new Float32Array(positions.count * 2);
-  for (let i = 0; i < positions.count; i++) {
-    uvs[i * 2] = positions.getX(i) / stampWidth;
-    uvs[i * 2 + 1] = positions.getY(i) / stampHeight;
-  }
-  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-}
-
-function createThinFeatureTexture(
-  thinMap: ThinFeatureMap,
-  normalColor: number,
-): THREE.DataTexture {
-  const { data, gridW, gridH } = thinMap;
-  const pixels = new Uint8Array(gridW * gridH * 4);
-
-  const nr = (normalColor >> 16) & 0xff;
-  const ng = (normalColor >> 8) & 0xff;
-  const nb = normalColor & 0xff;
-
-  for (let i = 0; i < gridW * gridH; i++) {
-    if (data[i]) {
-      pixels[i * 4] = 230;
-      pixels[i * 4 + 1] = 38;
-      pixels[i * 4 + 2] = 38;
-    } else {
-      pixels[i * 4] = nr;
-      pixels[i * 4 + 1] = ng;
-      pixels[i * 4 + 2] = nb;
-    }
-    pixels[i * 4 + 3] = 255;
-  }
-
-  const tex = new THREE.DataTexture(pixels, gridW, gridH);
-  tex.needsUpdate = true;
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  return tex;
-}

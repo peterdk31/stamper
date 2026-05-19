@@ -29,4 +29,10 @@ export const thickenStep: WorkerStep = {
     }
     return prevData;
   },
+
+  parseProgress: (message: unknown): number | null => {
+    const msg = message as ThickenMessage;
+    if (msg.type === "progress") return msg.progress;
+    return null;
+  },
 };

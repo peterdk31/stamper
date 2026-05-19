@@ -46,14 +46,14 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   threadConfig: { ...DEFAULT_THREAD_CONFIG },
 };
 
+export type TextAlign = "top" | "bottom";
+
 export interface StampText {
   content: string;
-  fontSize: number; // mm
+  fontSize: number; // mm — character height
   fontFamily: string;
   letterSpacing: number; // mm — extra space between characters
-  x: number; // offset from center, mm
-  y: number; // offset from center, mm
-  rotation: number; // degrees
+  align: TextAlign;
 }
 
 export interface StampProject {

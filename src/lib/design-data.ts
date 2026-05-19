@@ -84,10 +84,14 @@ export function rasterToDesignData(
   rawImageDims: { w: number; h: number },
   stampW: number,
   stampH: number,
+  region?: { yMin: number; yMax: number },
 ): DesignData {
-  const scale = Math.min(stampW / rawImageDims.w, stampH / rawImageDims.h);
+  const regionH = region ? (region.yMax - region.yMin) : stampH;
+  const regionY = region ? region.yMin : 0;
+
+  const scale = Math.min(stampW / rawImageDims.w, regionH / rawImageDims.h);
   const offsetX = (stampW - rawImageDims.w * scale) / 2;
-  const offsetY = (stampH - rawImageDims.h * scale) / 2;
+  const offsetY = regionY + (regionH - rawImageDims.h * scale) / 2;
 
   const scaled = rawContours.map((c) =>
     c.map((p) => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY })),

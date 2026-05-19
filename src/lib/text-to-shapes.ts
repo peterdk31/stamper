@@ -2,30 +2,30 @@ import * as THREE from "three";
 import type { Font } from "three/examples/jsm/loaders/FontLoader.js";
 import type { StampText } from "@/types/stamp";
 
-function rotatePoint(x: number, y: number, cx: number, cy: number, angle: number): [number, number] {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const dx = x - cx;
-  const dy = y - cy;
-  return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+// ---------------------------------------------------------------------------
+// Single-line character layout (unchanged core logic from before)
+// ---------------------------------------------------------------------------
+
+interface CharShape {
+  shapes: THREE.Shape[];
+  box: THREE.Box2;
 }
 
-function layoutEntry(
-  entry: StampText,
+function layoutLine(
+  text: string,
+  fontSize: number,
   font: Font,
-  letterSpacingExtra: number,
-): { textW: number; textH: number; charShapes: { shapes: THREE.Shape[]; box: THREE.Box2 }[] } | null {
-  const charShapes: { shapes: THREE.Shape[]; box: THREE.Box2 }[] = [];
+  letterSpacing: number,
+): { charShapes: CharShape[]; width: number; height: number; box: THREE.Box2 } | null {
+  const charShapes: CharShape[] = [];
   let cursor = 0;
 
-  for (let ci = 0; ci < entry.content.length; ci++) {
-    const char = entry.content[ci];
-    const spacing = letterSpacingExtra + (entry.letterSpacing ?? 0);
+  for (const char of text) {
     if (char === " ") {
-      cursor += entry.fontSize * 0.3 + spacing;
+      cursor += fontSize * 0.3 + letterSpacing;
       continue;
     }
-    const shapes = font.generateShapes(char, entry.fontSize);
+    const shapes = font.generateShapes(char, fontSize);
     if (shapes.length === 0) continue;
 
     const charBox = new THREE.Box2();
@@ -50,7 +50,7 @@ function layoutEntry(
       return ns;
     });
 
-    cursor += (charBox.max.x - charBox.min.x) + spacing;
+    cursor += (charBox.max.x - charBox.min.x) + letterSpacing;
 
     const shiftedBox = new THREE.Box2();
     for (const s of shifted) for (const p of s.getPoints(48)) shiftedBox.expandByPoint(p);
@@ -62,154 +62,258 @@ function layoutEntry(
   const box = new THREE.Box2();
   for (const cs of charShapes) box.union(cs.box);
 
-  return { textW: box.max.x - box.min.x, textH: box.max.y - box.min.y, charShapes };
-}
-
-export function computeTextBounds(
-  texts: StampText[],
-  fontCache: Map<string, Font>,
-  minFeatureWidth = 0,
-): { width: number; height: number } | null {
-  const letterSpacingExtra = minFeatureWidth;
-  const totalBox = new THREE.Box2();
-
-  for (const entry of texts) {
-    if (!entry.content) continue;
-    const font = fontCache.get(entry.fontFamily);
-    if (!font) continue;
-
-    const result = layoutEntry(entry, font, letterSpacingExtra);
-    if (!result) continue;
-
-    const { textW, textH } = result;
-    const rotRad = (entry.rotation * Math.PI) / 180;
-
-    const corners: [number, number][] = [
-      [entry.x - textW / 2, entry.y - textH / 2],
-      [entry.x + textW / 2, entry.y - textH / 2],
-      [entry.x + textW / 2, entry.y + textH / 2],
-      [entry.x - textW / 2, entry.y + textH / 2],
-    ];
-
-    for (const [cx, cy] of corners) {
-      if (rotRad !== 0) {
-        const [rx, ry] = rotatePoint(cx, cy, 0, 0, rotRad);
-        totalBox.expandByPoint(new THREE.Vector2(rx, ry));
-      } else {
-        totalBox.expandByPoint(new THREE.Vector2(cx, cy));
-      }
-    }
-  }
-
-  if (totalBox.isEmpty()) return null;
   return {
-    width: totalBox.max.x - totalBox.min.x,
-    height: totalBox.max.y - totalBox.min.y,
+    charShapes,
+    width: box.max.x - box.min.x,
+    height: box.max.y - box.min.y,
+    box,
   };
 }
 
-export function textEntriesToShapes(
+// ---------------------------------------------------------------------------
+// Multiline entry measurement
+// ---------------------------------------------------------------------------
+
+interface LineMeasurement {
+  layout: ReturnType<typeof layoutLine>;
+  height: number;
+}
+
+export interface EntryMeasurement {
+  lines: LineMeasurement[];
+  maxLineWidth: number;
+  totalHeight: number;
+  lineGap: number;
+}
+
+export function measureEntry(entry: StampText, font: Font): EntryMeasurement | null {
+  const lineTexts = entry.content.split("\n");
+  if (lineTexts.length === 0) return null;
+
+  const lines: LineMeasurement[] = [];
+  let maxWidth = 0;
+  const lineGap = entry.fontSize * 0.4;
+  let totalH = 0;
+
+  for (let i = 0; i < lineTexts.length; i++) {
+    const text = lineTexts[i].trim();
+    if (!text) {
+      const h = entry.fontSize * 0.6;
+      lines.push({ layout: null, height: h });
+      totalH += h;
+    } else {
+      const layout = layoutLine(text, entry.fontSize, font, entry.letterSpacing);
+      const h = layout ? layout.height : entry.fontSize * 0.6;
+      lines.push({ layout, height: h });
+      if (layout) maxWidth = Math.max(maxWidth, layout.width);
+      totalH += h;
+    }
+    if (i < lineTexts.length - 1) totalH += lineGap;
+  }
+
+  if (maxWidth === 0) return null;
+
+  return { lines, maxLineWidth: maxWidth, totalHeight: totalH, lineGap };
+}
+
+// ---------------------------------------------------------------------------
+// Layout computation — positions entries in vertical zones
+// ---------------------------------------------------------------------------
+
+export interface TextPlacement {
+  measurement: EntryMeasurement;
+  yTop: number;
+  scale: number;
+}
+
+export interface TextLayoutResult {
+  placements: TextPlacement[];
+  imageZone: { yMin: number; yMax: number };
+  totalTextHeight: number;
+}
+
+const ELEMENT_GAP = 1.5; // mm between text zones and image
+
+export function computeTextLayout(
   texts: StampText[],
   fontCache: Map<string, Font>,
   stampWidth: number,
   stampHeight: number,
-  minFeatureWidth = 0,
-  padding = 0,
-): THREE.Shape[] {
-  const letterSpacingExtra = minFeatureWidth;
+  padding: number,
+  hasImage: boolean,
+): TextLayoutResult {
+  const availW = stampWidth - padding * 2;
 
-  // Phase 1: generate raw shapes in content space (origin = content center)
-  interface RawShape {
-    points: THREE.Vector2[];
-    holes: THREE.Vector2[][];
-  }
-  const rawShapes: RawShape[] = [];
-
+  const measured: { entry: StampText; measurement: EntryMeasurement; displayH: number; scale: number }[] = [];
   for (const entry of texts) {
-    if (!entry.content) continue;
+    if (!entry.content.trim()) continue;
     const font = fontCache.get(entry.fontFamily);
     if (!font) continue;
-
-    const result = layoutEntry(entry, font, letterSpacingExtra);
-    if (!result) continue;
-
-    const { textW, textH, charShapes } = result;
-
-    const box = new THREE.Box2();
-    for (const cs of charShapes) box.union(cs.box);
-
-    const offsetX = -textW / 2 - box.min.x + entry.x;
-    const offsetY = -textH / 2 - box.min.y + entry.y;
-    const rotRad = (entry.rotation * Math.PI) / 180;
-
-    for (const original of charShapes.flatMap(cs => cs.shapes)) {
-      const points = original.getPoints(48).map(p => {
-        let x = p.x + offsetX;
-        let y = p.y + offsetY;
-        if (rotRad !== 0) [x, y] = rotatePoint(x, y, 0, 0, rotRad);
-        return new THREE.Vector2(x, y);
-      });
-
-      const holes: THREE.Vector2[][] = [];
-      for (const hole of original.holes) {
-        holes.push(hole.getPoints(48).map(p => {
-          let x = p.x + offsetX;
-          let y = p.y + offsetY;
-          if (rotRad !== 0) [x, y] = rotatePoint(x, y, 0, 0, rotRad);
-          return new THREE.Vector2(x, y);
-        }));
-      }
-
-      rawShapes.push({ points, holes });
-    }
+    const m = measureEntry(entry, font);
+    if (!m) continue;
+    const scale = m.maxLineWidth > 0 ? Math.min(1, availW / m.maxLineWidth) : 1;
+    measured.push({ entry, measurement: m, displayH: m.totalHeight * scale, scale });
   }
 
-  if (rawShapes.length === 0) return [];
+  if (!hasImage || measured.length === 0) {
+    const gaps = measured.length > 1 ? ELEMENT_GAP * (measured.length - 1) : 0;
+    const totalH = measured.reduce((s, m) => s + m.displayH, 0) + gaps;
 
-  // Phase 2: compute bounds, scale to fill stamp, center
-  const totalBox = new THREE.Box2();
-  for (const rs of rawShapes) for (const p of rs.points) totalBox.expandByPoint(p);
-
-  const totalW = totalBox.max.x - totalBox.min.x;
-  const totalH = totalBox.max.y - totalBox.min.y;
-  const contentCenterX = (totalBox.min.x + totalBox.max.x) / 2;
-  const contentCenterY = (totalBox.min.y + totalBox.max.y) / 2;
-
-  const availW = stampWidth - padding * 2;
-  const availH = stampHeight - padding * 2;
-  const scale = totalW > 0 && totalH > 0
-    ? Math.min(availW / totalW, availH / totalH)
-    : 1;
-
-  const stampCenterX = stampWidth / 2;
-  const stampCenterY = stampHeight / 2;
-
-  const allShapes: THREE.Shape[] = [];
-  for (const rs of rawShapes) {
-    const transformed = rs.points.map(p => new THREE.Vector2(
-      (p.x - contentCenterX) * scale + stampCenterX,
-      (p.y - contentCenterY) * scale + stampCenterY,
-    ));
-
-    if (transformed.length === 0) continue;
-    const shape = new THREE.Shape();
-    shape.moveTo(transformed[0].x, transformed[0].y);
-    for (let i = 1; i < transformed.length; i++) shape.lineTo(transformed[i].x, transformed[i].y);
-    shape.closePath();
-
-    for (const holePoints of rs.holes) {
-      const th = holePoints.map(p => new THREE.Vector2(
-        (p.x - contentCenterX) * scale + stampCenterX,
-        (p.y - contentCenterY) * scale + stampCenterY,
-      ));
-      if (th.length === 0) continue;
-      const holePath = new THREE.Path();
-      holePath.moveTo(th[0].x, th[0].y);
-      for (let i = 1; i < th.length; i++) holePath.lineTo(th[i].x, th[i].y);
-      shape.holes.push(holePath);
+    let y = stampHeight / 2 + totalH / 2;
+    const placements: TextPlacement[] = [];
+    for (const m of measured) {
+      placements.push({ measurement: m.measurement, yTop: y, scale: m.scale });
+      y -= m.displayH + ELEMENT_GAP;
     }
 
-    allShapes.push(shape);
+    return {
+      placements,
+      imageZone: { yMin: padding, yMax: stampHeight - padding },
+      totalTextHeight: totalH,
+    };
+  }
+
+  // With image: split into top/bottom zones
+  const topEntries = measured.filter((m) => m.entry.align === "top");
+  const bottomEntries = measured.filter((m) => m.entry.align === "bottom");
+
+  const topInternalGaps = topEntries.length > 1 ? ELEMENT_GAP * (topEntries.length - 1) : 0;
+  const bottomInternalGaps = bottomEntries.length > 1 ? ELEMENT_GAP * (bottomEntries.length - 1) : 0;
+
+  const topH = topEntries.reduce((s, m) => s + m.displayH, 0) + topInternalGaps;
+  const bottomH = bottomEntries.reduce((s, m) => s + m.displayH, 0) + bottomInternalGaps;
+
+  const topGap = topEntries.length > 0 ? ELEMENT_GAP : 0;
+  const bottomGap = bottomEntries.length > 0 ? ELEMENT_GAP : 0;
+
+  const imageYMax = stampHeight - padding - topH - topGap;
+  const imageYMin = padding + bottomH + bottomGap;
+
+  const placements: TextPlacement[] = [];
+
+  // Top entries: stack downward from stamp top
+  let y = stampHeight - padding;
+  for (const m of topEntries) {
+    placements.push({ measurement: m.measurement, yTop: y, scale: m.scale });
+    y -= m.displayH + ELEMENT_GAP;
+  }
+
+  // Bottom entries: stack upward from stamp bottom
+  y = padding;
+  for (let i = bottomEntries.length - 1; i >= 0; i--) {
+    const m = bottomEntries[i];
+    placements.push({ measurement: m.measurement, yTop: y + m.displayH, scale: m.scale });
+    y += m.displayH + ELEMENT_GAP;
+  }
+
+  return {
+    placements,
+    imageZone: { yMin: Math.max(padding, imageYMin), yMax: Math.min(stampHeight - padding, imageYMax) },
+    totalTextHeight: topH + bottomH,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Compute required stamp height for auto-sizing
+// ---------------------------------------------------------------------------
+
+export function computeRequiredHeight(
+  texts: StampText[],
+  fontCache: Map<string, Font>,
+  stampWidth: number,
+  padding: number,
+  hasImage: boolean,
+  imageAspectRatio: number | null,
+): number | null {
+  const availW = stampWidth - padding * 2;
+
+  const measured: { entry: StampText; displayH: number }[] = [];
+  for (const entry of texts) {
+    if (!entry.content.trim()) continue;
+    const font = fontCache.get(entry.fontFamily);
+    if (!font) continue;
+    const m = measureEntry(entry, font);
+    if (!m) continue;
+    const scale = m.maxLineWidth > 0 ? Math.min(1, availW / m.maxLineWidth) : 1;
+    measured.push({ entry, displayH: m.totalHeight * scale });
+  }
+
+  if (measured.length === 0 && !hasImage) return null;
+
+  if (!hasImage) {
+    const gaps = measured.length > 1 ? ELEMENT_GAP * (measured.length - 1) : 0;
+    return measured.reduce((s, m) => s + m.displayH, 0) + gaps + padding * 2;
+  }
+
+  const topEntries = measured.filter((m) => m.entry.align === "top");
+  const bottomEntries = measured.filter((m) => m.entry.align === "bottom");
+
+  const topGaps = topEntries.length > 0 ? ELEMENT_GAP + (topEntries.length > 1 ? ELEMENT_GAP * (topEntries.length - 1) : 0) : 0;
+  const bottomGaps = bottomEntries.length > 0 ? ELEMENT_GAP + (bottomEntries.length > 1 ? ELEMENT_GAP * (bottomEntries.length - 1) : 0) : 0;
+
+  const topH = topEntries.reduce((s, m) => s + m.displayH, 0);
+  const bottomH = bottomEntries.reduce((s, m) => s + m.displayH, 0);
+
+  const imageH = imageAspectRatio && imageAspectRatio > 0
+    ? availW / imageAspectRatio
+    : 0;
+
+  return topH + topGaps + imageH + bottomGaps + bottomH + padding * 2;
+}
+
+// ---------------------------------------------------------------------------
+// Render placements to THREE.Shape[]
+// ---------------------------------------------------------------------------
+
+export function renderTextPlacements(
+  placements: TextPlacement[],
+  stampWidth: number,
+): THREE.Shape[] {
+  const allShapes: THREE.Shape[] = [];
+  const stampCenterX = stampWidth / 2;
+
+  for (const { measurement, yTop, scale } of placements) {
+    let lineY = yTop;
+
+    for (const { layout, height } of measurement.lines) {
+      if (!layout) {
+        lineY -= height * scale + measurement.lineGap * scale;
+        continue;
+      }
+
+      const lineCenterX = (layout.box.min.x + layout.box.max.x) / 2;
+      const offsetX = stampCenterX - lineCenterX * scale;
+      const offsetY = lineY - layout.box.max.y * scale;
+
+      for (const cs of layout.charShapes) {
+        for (const shape of cs.shapes) {
+          const pts = shape.getPoints(48);
+          if (pts.length === 0) continue;
+
+          const ns = new THREE.Shape();
+          ns.moveTo(pts[0].x * scale + offsetX, pts[0].y * scale + offsetY);
+          for (let i = 1; i < pts.length; i++) {
+            ns.lineTo(pts[i].x * scale + offsetX, pts[i].y * scale + offsetY);
+          }
+          ns.closePath();
+
+          for (const hole of shape.holes) {
+            const hpts = hole.getPoints(48);
+            if (hpts.length === 0) continue;
+            const hp = new THREE.Path();
+            hp.moveTo(hpts[0].x * scale + offsetX, hpts[0].y * scale + offsetY);
+            for (let i = 1; i < hpts.length; i++) {
+              hp.lineTo(hpts[i].x * scale + offsetX, hpts[i].y * scale + offsetY);
+            }
+            ns.holes.push(hp);
+          }
+
+          allShapes.push(ns);
+        }
+      }
+
+      lineY -= height * scale + measurement.lineGap * scale;
+    }
   }
 
   return allShapes;

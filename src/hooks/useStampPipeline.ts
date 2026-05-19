@@ -7,7 +7,7 @@ import type { TraceMessage } from "@/lib/image-trace.worker";
 import type { AutoFitResult } from "@/lib/auto-fit.worker";
 import { rasterToDesignData, designDataToShapes } from "@/lib/design-data";
 import { getFontCache } from "@/lib/font-manager";
-import { computeTextBounds } from "@/lib/text-to-shapes";
+import { computeRequiredHeight } from "@/lib/text-to-shapes";
 import { textToDesignData } from "@/lib/pipeline/text";
 import { mergeDesignData } from "@/lib/pipeline/merge";
 import { thickenStep } from "@/lib/pipeline/thicken";
@@ -40,8 +40,10 @@ export interface PipelineOutputs {
   traceStage: string;
   isThickening: boolean;
   isSmoothing: boolean;
-  smoothProgress: number;
   isAutoFitting: boolean;
+  isProcessing: boolean;
+  pipelineProgress: number;
+  pipelineStage: string;
   hasDesign: boolean;
 
   onFindMinWidth: (() => void) | undefined;
@@ -208,23 +210,6 @@ function useImageTrace(
 }
 
 // ---------------------------------------------------------------------------
-// Source: text → DesignData
-// ---------------------------------------------------------------------------
-
-function useTextSource(
-  texts: StampText[],
-  fontsReady: boolean,
-  stampWidth: number,
-  stampHeight: number,
-  padding: number,
-): DesignData | null {
-  return useMemo(() => {
-    if (!fontsReady || texts.length === 0) return null;
-    return textToDesignData(texts, getFontCache(), stampWidth, stampHeight, padding);
-  }, [texts, fontsReady, stampWidth, stampHeight, padding]);
-}
-
-// ---------------------------------------------------------------------------
 // Effective settings (auto-size from content dimensions)
 // ---------------------------------------------------------------------------
 
@@ -233,35 +218,39 @@ function useEffectiveSettings(
   sourceAspectRatio: number | null,
   texts: StampText[],
   fontsReady: boolean,
+  hasImage: boolean,
 ): StampSettings {
   const effectiveHeight = useMemo(() => {
     if (!settings.autoSize) return settings.height;
 
-    let newHeight: number | null = null;
+    const hasTexts = texts.length > 0 && fontsReady;
+
+    if (!hasTexts && !sourceAspectRatio) return settings.height;
+
+    const required = hasTexts
+      ? computeRequiredHeight(texts, getFontCache(), settings.width, settings.padding, hasImage, sourceAspectRatio)
+      : null;
+
+    if (required !== null) {
+      const minHeight = settings.threadEnabled
+        ? Math.max(10, settings.threadConfig.majorDiameter + 4)
+        : 10;
+      return Math.round(Math.max(minHeight, required) * 10) / 10;
+    }
 
     if (sourceAspectRatio && sourceAspectRatio > 0) {
-      newHeight = settings.width / sourceAspectRatio;
+      const h = settings.width / sourceAspectRatio;
+      const minHeight = settings.threadEnabled
+        ? Math.max(10, settings.threadConfig.majorDiameter + 4)
+        : 10;
+      return Math.round(Math.max(minHeight, h) * 10) / 10;
     }
 
-    if (texts.length > 0 && fontsReady) {
-      const bounds = computeTextBounds(texts, getFontCache());
-      if (bounds && bounds.width > 0) {
-        const availWidth = settings.width - settings.padding * 2;
-        const scale = availWidth / bounds.width;
-        const textHeight = bounds.height * scale + settings.padding * 2;
-        newHeight = newHeight ? Math.max(newHeight, textHeight) : textHeight;
-      }
-    }
-
-    if (newHeight === null) return settings.height;
-    const minHeight = settings.threadEnabled
-      ? Math.max(10, settings.threadConfig.majorDiameter + 4)
-      : 10;
-    return Math.round(Math.max(minHeight, newHeight) * 10) / 10;
+    return settings.height;
   }, [
     settings.autoSize, settings.height, settings.width, settings.padding,
     settings.threadEnabled, settings.threadConfig.majorDiameter,
-    sourceAspectRatio, texts, fontsReady,
+    sourceAspectRatio, texts, fontsReady, hasImage,
   ]);
 
   return useMemo(
@@ -275,19 +264,20 @@ function useEffectiveSettings(
 // ---------------------------------------------------------------------------
 
 function useAutoFit(
-  shapes: THREE.Shape[],
+  rawDesignShapes: THREE.Shape[],
   effectiveSettings: StampSettings,
   setSettings: React.Dispatch<React.SetStateAction<StampSettings>>,
+  thickenEnabled: boolean,
 ) {
   const [isAutoFitting, setIsAutoFitting] = useState(false);
-  const autoFitWorkerRef = useRef<Worker | null>(null);
+  const workerRef = useRef<Worker | null>(null);
 
-  const onFindMinWidth = shapes.length > 0 ? () => {
+  const onFindMinWidth = rawDesignShapes.length > 0 ? () => {
     if (isAutoFitting) return;
     setIsAutoFitting(true);
 
     const box = new THREE.Box2();
-    for (const s of shapes) {
+    for (const s of rawDesignShapes) {
       for (const p of s.getPoints()) box.expandByPoint(p);
       for (const h of s.holes) for (const p of h.getPoints()) box.expandByPoint(p);
     }
@@ -295,14 +285,14 @@ function useAutoFit(
     const contentH = box.max.y - box.min.y;
     if (contentW <= 0 || contentH <= 0) { setIsAutoFitting(false); return; }
 
-    const serialized = shapes.map((s) => ({
+    const serialized = rawDesignShapes.map((s) => ({
       outer: s.getPoints(48).map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y })),
       holes: s.holes.map((h) => h.getPoints(48).map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y }))),
     }));
 
-    if (autoFitWorkerRef.current) autoFitWorkerRef.current.terminate();
+    if (workerRef.current) workerRef.current.terminate();
     const worker = new Worker(new URL("../lib/auto-fit.worker.ts", import.meta.url));
-    autoFitWorkerRef.current = worker;
+    workerRef.current = worker;
 
     worker.onmessage = (e: MessageEvent<AutoFitResult>) => {
       if (e.data.type === "result") {
@@ -313,19 +303,21 @@ function useAutoFit(
       }
       setIsAutoFitting(false);
       worker.terminate();
-      autoFitWorkerRef.current = null;
+      workerRef.current = null;
     };
     worker.onerror = () => {
       setIsAutoFitting(false);
       worker.terminate();
-      autoFitWorkerRef.current = null;
+      workerRef.current = null;
     };
 
     worker.postMessage({
       shapes: serialized,
       contentW,
       contentH,
-      nozzleDiameter: effectiveSettings.nozzleDiameter,
+      nozzleDiameter: thickenEnabled
+        ? effectiveSettings.nozzleDiameter / 2
+        : effectiveSettings.nozzleDiameter,
     });
   } : undefined;
 
@@ -342,33 +334,56 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
   const trace = useImageTrace(imageDataUrl, svgText);
 
-  // 2. Effective settings (auto-size based on source aspect ratio + text bounds)
-  const effectiveSettings = useEffectiveSettings(settings, trace.sourceAspectRatio, texts, fontsReady);
+  const hasImage = !!(trace.rawContours && trace.rawImageDims);
 
-  // 3. Sources → DesignData (scaled to effective stamp dimensions)
+  // 2. Effective settings (auto-size based on stacked layout)
+  const effectiveSettings = useEffectiveSettings(settings, trace.sourceAspectRatio, texts, fontsReady, hasImage);
+
+  // 3. Text layout → produces text DesignData and image zone
+  const textLayout = useMemo(() => {
+    if (!fontsReady || texts.length === 0) {
+      return {
+        textData: null as DesignData | null,
+        imageZone: { yMin: effectiveSettings.padding, yMax: effectiveSettings.height - effectiveSettings.padding },
+      };
+    }
+    return textToDesignData(
+      texts, getFontCache(),
+      effectiveSettings.width, effectiveSettings.height, effectiveSettings.padding,
+      hasImage,
+    );
+  }, [texts, fontsReady, effectiveSettings.width, effectiveSettings.height, effectiveSettings.padding, hasImage]);
+
+  // 4. Image → DesignData (rendered within computed image zone)
   const imageData = useMemo<DesignData | null>(() => {
     if (trace.rawContours && trace.rawImageDims) {
-      return rasterToDesignData(trace.rawContours, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height);
+      const hasText = textLayout.textData !== null;
+      return rasterToDesignData(
+        trace.rawContours, trace.rawImageDims,
+        effectiveSettings.width, effectiveSettings.height,
+        hasText ? textLayout.imageZone : undefined,
+      );
     }
     return null;
-  }, [trace.rawContours, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height]);
+  }, [trace.rawContours, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData]);
 
-  const textData = useTextSource(texts, fontsReady, effectiveSettings.width, effectiveSettings.height, effectiveSettings.padding);
+  // 5. Smooth image data (before merge — smoothing should not apply to text)
+  const stepFlags: StepFlags = { thickenEnabled, smoothEnabled };
+  const afterSmooth = usePipelineStep(smoothStep, imageData, effectiveSettings, stepFlags);
 
+  // 6. Merge sources (smoothed image + raw text)
   const merged = useMemo(
-    () => mergeDesignData(imageData, textData),
-    [imageData, textData],
+    () => mergeDesignData(afterSmooth.data, textLayout.textData),
+    [afterSmooth.data, textLayout.textData],
   );
 
-  // 4. Processing chain — add new steps here
-  const stepFlags: StepFlags = { thickenEnabled, smoothEnabled };
+  // 7. Processing chain (post-merge)
   const afterThicken = usePipelineStep(thickenStep, merged, effectiveSettings, stepFlags);
-  const afterSmooth = usePipelineStep(smoothStep, afterThicken.data, effectiveSettings, stepFlags);
 
-  // 5. Output: DesignData → THREE.Shape[]
+  // 8. Output: DesignData → THREE.Shape[]
   const shapes = useMemo(
-    () => afterSmooth.data ? designDataToShapes(afterSmooth.data) : [],
-    [afterSmooth.data],
+    () => afterThicken.data ? designDataToShapes(afterThicken.data) : [],
+    [afterThicken.data],
   );
 
   const rawDesignShapes = useMemo(
@@ -376,8 +391,22 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     [imageData],
   );
 
-  // Auto-fit (on-demand, not a pipeline step)
-  const { isAutoFitting, onFindMinWidth } = useAutoFit(shapes, effectiveSettings, setSettings);
+  const isProcessing = trace.isTracing || afterThicken.isProcessing || afterSmooth.isProcessing;
+
+  // Auto-fit (on-demand, uses pre-pipeline shapes for idempotency)
+  const { isAutoFitting, onFindMinWidth } = useAutoFit(rawDesignShapes, effectiveSettings, setSettings, thickenEnabled);
+
+  // Combined pipeline progress
+  const { pipelineProgress, pipelineStage } = useMemo(() => {
+    const steps: { active: boolean; progress: number; label: string }[] = [];
+    if (trace.isTracing) steps.push({ active: true, progress: trace.traceProgress, label: trace.traceStage || "Tracing…" });
+    if (thickenEnabled && merged) steps.push({ active: afterThicken.isProcessing, progress: afterThicken.isProcessing ? afterThicken.progress : 1, label: "Thickening…" });
+    if (smoothEnabled && merged) steps.push({ active: afterSmooth.isProcessing, progress: afterSmooth.isProcessing ? afterSmooth.progress : 1, label: "Smoothing…" });
+    if (steps.length === 0) return { pipelineProgress: 0, pipelineStage: "" };
+    const total = steps.reduce((sum, s) => sum + s.progress, 0) / steps.length;
+    const current = steps.find((s) => s.active);
+    return { pipelineProgress: total, pipelineStage: current?.label ?? "" };
+  }, [trace.isTracing, trace.traceProgress, trace.traceStage, thickenEnabled, smoothEnabled, merged, afterThicken.isProcessing, afterThicken.progress, afterSmooth.isProcessing, afterSmooth.progress]);
 
   return {
     shapes,
@@ -388,8 +417,10 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     traceStage: trace.traceStage,
     isThickening: afterThicken.isProcessing,
     isSmoothing: afterSmooth.isProcessing,
-    smoothProgress: afterSmooth.progress,
     isAutoFitting,
+    isProcessing,
+    pipelineProgress,
+    pipelineStage,
     hasDesign: rawDesignShapes.length > 0,
     onFindMinWidth,
   };
