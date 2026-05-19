@@ -71,6 +71,7 @@ export default function Home() {
   const [isTracing, setIsTracing] = useState(false);
   const [traceProgress, setTraceProgress] = useState(0);
   const [traceStage, setTraceStage] = useState("");
+  const [loadedPixels, setLoadedPixels] = useState<ImageData | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
   const terminateWorker = useCallback(() => {
@@ -84,85 +85,98 @@ export default function Home() {
     return terminateWorker;
   }, [terminateWorker]);
 
-  const processRasterImage = useCallback(
-    (dataUrl: string) => {
-      terminateWorker();
-      setIsTracing(true);
-      setTraceProgress(0);
-      setTraceStage("Loading image…");
+  // Phase 1: Load and decode raster image (sets aspect ratio + pixel data).
+  // This is separated from tracing so setImageAspectRatio doesn't kill
+  // the worker via an effectiveSettings → useEffect re-trigger loop.
+  useEffect(() => {
+    setLoadedPixels(null);
 
-      const img = new window.Image();
-      img.onerror = () => {
-        setIsTracing(false);
-      };
-      img.onload = () => {
-        setImageAspectRatio(img.width / img.height);
+    if (!imageDataUrl) {
+      setImageAspectRatio(null);
+      return;
+    }
 
-        const MAX_TRACE_DIM = 800;
-        const scale = Math.min(1, MAX_TRACE_DIM / Math.max(img.width, img.height));
-        const tw = Math.round(img.width * scale);
-        const th = Math.round(img.height * scale);
+    setIsTracing(true);
+    setTraceProgress(0);
+    setTraceStage("Loading image…");
 
-        const canvas = document.createElement("canvas");
-        canvas.width = tw;
-        canvas.height = th;
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, 0, 0, tw, th);
-        const imageData = ctx.getImageData(0, 0, tw, th);
+    const img = new window.Image();
+    img.onerror = () => setIsTracing(false);
+    img.onload = () => {
+      setImageAspectRatio(img.width / img.height);
 
-        const worker = new Worker(
-          new URL("../lib/image-trace.worker.ts", import.meta.url),
-        );
-        workerRef.current = worker;
+      const MAX_TRACE_DIM = 800;
+      const scale = Math.min(1, MAX_TRACE_DIM / Math.max(img.width, img.height));
+      const tw = Math.round(img.width * scale);
+      const th = Math.round(img.height * scale);
 
-        worker.onmessage = (e: MessageEvent<TraceMessage>) => {
-          const msg = e.data;
-          if (msg.type === "progress") {
-            setTraceProgress(msg.progress);
-            setTraceStage(msg.stage);
-          } else if (msg.type === "result") {
-            setDesignShapes(contoursToShapes(msg.contours));
-            setIsTracing(false);
-            terminateWorker();
-          }
-        };
+      const canvas = document.createElement("canvas");
+      canvas.width = tw;
+      canvas.height = th;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, tw, th);
+      setLoadedPixels(ctx.getImageData(0, 0, tw, th));
+    };
+    img.src = imageDataUrl;
+  }, [imageDataUrl]);
 
-        worker.onerror = () => {
-          setIsTracing(false);
-          terminateWorker();
-        };
-
-        const req: TraceRequest = {
-          width: imageData.width,
-          height: imageData.height,
-          data: imageData.data,
-          targetWidth: effectiveSettings.width,
-          targetHeight: effectiveSettings.height,
-          simplification: effectiveSettings.simplification,
-          threshold: 128,
-        };
-        worker.postMessage(req);
-      };
-      img.src = dataUrl;
-    },
-    [effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, terminateWorker],
-  );
-
+  // Phase 2: Trace contours once pixels and effective settings are stable.
   useEffect(() => {
     if (svgText) {
       terminateWorker();
       setIsTracing(false);
       const shapes = parseSvgToShapes(svgText, effectiveSettings.width, effectiveSettings.height);
       setDesignShapes(shapes);
-    } else if (imageDataUrl) {
-      processRasterImage(imageDataUrl);
-    } else {
-      terminateWorker();
-      setIsTracing(false);
-      setDesignShapes([]);
-      setImageAspectRatio(null);
+      return;
     }
-  }, [svgText, imageDataUrl, effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, processRasterImage, terminateWorker]);
+
+    if (!loadedPixels) {
+      terminateWorker();
+      if (!imageDataUrl) {
+        setIsTracing(false);
+        setDesignShapes([]);
+      }
+      return;
+    }
+
+    terminateWorker();
+    setIsTracing(true);
+    setTraceProgress(0);
+    setTraceStage("Starting…");
+
+    const worker = new Worker(
+      new URL("../lib/image-trace.worker.ts", import.meta.url),
+    );
+    workerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent<TraceMessage>) => {
+      const msg = e.data;
+      if (msg.type === "progress") {
+        setTraceProgress(msg.progress);
+        setTraceStage(msg.stage);
+      } else if (msg.type === "result") {
+        setDesignShapes(contoursToShapes(msg.contours));
+        setIsTracing(false);
+        terminateWorker();
+      }
+    };
+
+    worker.onerror = () => {
+      setIsTracing(false);
+      terminateWorker();
+    };
+
+    const req: TraceRequest = {
+      width: loadedPixels.width,
+      height: loadedPixels.height,
+      data: loadedPixels.data,
+      targetWidth: effectiveSettings.width,
+      targetHeight: effectiveSettings.height,
+      simplification: effectiveSettings.simplification,
+      threshold: 128,
+    };
+    worker.postMessage(req);
+  }, [svgText, loadedPixels, imageDataUrl, effectiveSettings.width, effectiveSettings.height, effectiveSettings.simplification, terminateWorker]);
 
   const textShapes = useMemo(() => {
     if (!fontsReady) return [];

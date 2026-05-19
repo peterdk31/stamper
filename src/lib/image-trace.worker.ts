@@ -197,7 +197,7 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     const rounded = Math.round(progress * 100);
     if (rounded === lastReported) return;
     lastReported = rounded;
-    post({ type: "progress", progress, stage } satisfies TraceMessage);
+    post({ type: "progress", progress, stage } as TraceMessage);
   };
 
   report(0, "Building pixel grid…");
@@ -239,5 +239,5 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     contour.map((p) => ({ x: p.x * scaleX, y: (height - p.y) * scaleY })),
   );
 
-  post({ type: "result", contours: scaledContours } satisfies TraceMessage);
+  post({ type: "result", contours: scaledContours } as TraceMessage);
 };
