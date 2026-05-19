@@ -10,6 +10,7 @@ import { parseRawSvg, scaleRawSvgToStamp, getSvgAspectRatio, type RawSvgData } f
 import { loadAllBundledFonts, getFontCache, type FontEntry } from "@/lib/font-manager";
 import { textEntriesToShapes, computeTextBounds } from "@/lib/text-to-shapes";
 import type { AutoFitResult } from "@/lib/auto-fit.worker";
+import type { ThickenMessage } from "@/lib/thicken.worker";
 import StampSettingsPanel from "@/components/StampSettingsPanel";
 import ImageUpload from "@/components/ImageUpload";
 import TextEditor from "@/components/TextEditor";
@@ -74,6 +75,10 @@ export default function Home() {
 
   const [isAutoFitting, setIsAutoFitting] = useState(false);
   const autoFitWorkerRef = useRef<Worker | null>(null);
+
+  const [thickenEnabled, setThickenEnabled] = useState(false);
+  const [thickenedShapes, setThickenedShapes] = useState<THREE.Shape[] | null>(null);
+  const [isThickening, setIsThickening] = useState(false);
 
   const [isTracing, setIsTracing] = useState(false);
   const [traceProgress, setTraceProgress] = useState(0);
@@ -182,7 +187,7 @@ export default function Home() {
   }, [svgText]);
 
   // Scale raw design data to current stamp dimensions (instant, no re-trace).
-  const designShapes = useMemo(() => {
+  const rawDesignShapes = useMemo(() => {
     if (rawSvgData) {
       return scaleRawSvgToStamp(rawSvgData, effectiveSettings.width, effectiveSettings.height);
     }
@@ -200,6 +205,48 @@ export default function Home() {
     }
     return [];
   }, [rawSvgData, rawContours, rawImageDims, effectiveSettings.width, effectiveSettings.height]);
+
+  useEffect(() => {
+    if (!thickenEnabled || rawDesignShapes.length === 0) {
+      setThickenedShapes(null);
+      setIsThickening(false);
+      return;
+    }
+
+    setIsThickening(true);
+    setThickenedShapes(null);
+
+    const serialized = rawDesignShapes.map((s) => ({
+      points: s.getPoints().map((p) => ({ x: p.x, y: p.y })),
+      holes: s.holes.map((h) => h.getPoints().map((p) => ({ x: p.x, y: p.y }))),
+    }));
+
+    const worker = new Worker(new URL("../lib/thicken.worker.ts", import.meta.url));
+
+    worker.onmessage = (e: MessageEvent<ThickenMessage>) => {
+      if (e.data.type === "result") {
+        setThickenedShapes(contoursToShapes(e.data.contours));
+        setIsThickening(false);
+      }
+    };
+
+    worker.onerror = () => {
+      setIsThickening(false);
+    };
+
+    worker.postMessage({
+      shapes: serialized,
+      stampWidth: effectiveSettings.width,
+      stampHeight: effectiveSettings.height,
+      nozzleDiameter: effectiveSettings.nozzleDiameter,
+    });
+
+    return () => {
+      worker.terminate();
+    };
+  }, [thickenEnabled, rawDesignShapes, effectiveSettings.nozzleDiameter, effectiveSettings.width, effectiveSettings.height]);
+
+  const designShapes = thickenedShapes ?? rawDesignShapes;
 
   const textShapes = useMemo(() => {
     if (!fontsReady) return [];
@@ -248,6 +295,10 @@ export default function Home() {
           />
           <StampSettingsPanel settings={effectiveSettings} onChange={setSettings}
             isAutoFitting={isAutoFitting}
+            thickenEnabled={thickenEnabled}
+            isThickening={isThickening}
+            hasDesign={rawDesignShapes.length > 0}
+            onThickenToggle={() => setThickenEnabled((v) => !v)}
             onFindMinWidth={designShapes.length > 0 || textShapes.length > 0 ? () => {
               if (isAutoFitting) return;
               setIsAutoFitting(true);
