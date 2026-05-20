@@ -89,6 +89,8 @@ export default function Home() {
             isProcessing={pipeline.isTracing}
             progress={pipeline.traceProgress}
             progressStage={pipeline.traceStage}
+            threshold={settings.threshold}
+            onThresholdChange={(v) => setSettings((s) => ({ ...s, threshold: v }))}
           />
           <TextEditor
             texts={texts}

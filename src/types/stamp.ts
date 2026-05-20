@@ -24,6 +24,7 @@ export interface StampSettings {
   padding: number; // mm — spacing around content when auto-sizing
   designMode: DesignMode;
   simplification: number; // 0–1, controls raster trace detail
+  threshold: number; // 0–255, luminance cutoff for black/white conversion
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
@@ -41,6 +42,7 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   padding: 4,
   designMode: "raised",
   simplification: 0.5,
+  threshold: 128,
   nozzleDiameter: 0.4,
   threadEnabled: true,
   threadConfig: { ...DEFAULT_THREAD_CONFIG },

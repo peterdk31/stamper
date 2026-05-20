@@ -105,6 +105,7 @@ interface TraceOutput {
 function useImageTrace(
   imageDataUrl: string | null,
   svgText: string | null,
+  threshold: number,
 ): TraceOutput {
   const [state, dispatch] = useReducer(traceReducer, INITIAL_TRACE_STATE);
   const workerRef = useRef<Worker | null>(null);
@@ -175,7 +176,7 @@ function useImageTrace(
           if (workerRef.current === worker) workerRef.current = null;
         };
 
-        worker.postMessage({ bitmap, threshold: 128 }, [bitmap]);
+        worker.postMessage({ bitmap, threshold }, [bitmap]);
       }).catch(() => {
         if (!cancelled) dispatch({ type: "error" });
       });
@@ -190,7 +191,7 @@ function useImageTrace(
         workerRef.current = null;
       }
     };
-  }, [imageDataUrl, svgText]);
+  }, [imageDataUrl, svgText, threshold]);
 
   const sourceAspectRatio = useMemo(() => {
     if (state.rawImageDims) return state.rawImageDims.w / state.rawImageDims.h;
@@ -327,7 +328,7 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled, smoothEnabled } = inputs;
 
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
-  const trace = useImageTrace(imageDataUrl, svgText);
+  const trace = useImageTrace(imageDataUrl, svgText, settings.threshold);
 
   const hasImage = !!(trace.rawShapes && trace.rawImageDims);
 

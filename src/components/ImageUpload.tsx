@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 
 interface Props {
   imageDataUrl: string | null;
@@ -10,14 +10,75 @@ interface Props {
   isProcessing?: boolean;
   progress?: number;
   progressStage?: string;
+  threshold?: number;
+  onThresholdChange?: (value: number) => void;
 }
 
 export default function ImageUpload({
   imageDataUrl, svgText,
   onImageChange, onSvgChange,
   isProcessing, progress = 0, progressStage = "",
+  threshold = 128, onThresholdChange,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pixelCacheRef = useRef<ImageData | null>(null);
+  const isDraggingRef = useRef(false);
+  const localThresholdRef = useRef(threshold);
+  const thresholdRef = useRef(threshold);
+  thresholdRef.current = threshold;
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const sliderRef = useRef<HTMLInputElement>(null);
+
+  function drawThreshold(t: number) {
+    const canvas = canvasRef.current;
+    const srcData = pixelCacheRef.current;
+    if (!canvas || !srcData) return;
+    if (canvas.width !== srcData.width || canvas.height !== srcData.height) {
+      canvas.width = srcData.width;
+      canvas.height = srcData.height;
+    }
+    const ctx = canvas.getContext("2d")!;
+    const out = ctx.createImageData(srcData.width, srcData.height);
+    const src = srcData.data;
+    const dst = out.data;
+    for (let i = 0; i < src.length; i += 4) {
+      const lum = 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
+      const v = lum >= t ? 255 : 0;
+      dst[i] = dst[i + 1] = dst[i + 2] = v;
+      dst[i + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
+    if (labelRef.current) labelRef.current.textContent = String(t);
+  }
+
+  useEffect(() => {
+    if (!imageDataUrl) { pixelCacheRef.current = null; return; }
+    const img = new window.Image();
+    img.onload = () => {
+      const maxDim = 400;
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const off = document.createElement("canvas");
+      off.width = w;
+      off.height = h;
+      const ctx = off.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      pixelCacheRef.current = ctx.getImageData(0, 0, w, h);
+      drawThreshold(thresholdRef.current);
+    };
+    img.src = imageDataUrl;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageDataUrl]);
+
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      drawThreshold(threshold);
+      if (sliderRef.current) sliderRef.current.value = String(threshold);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threshold]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -74,8 +135,11 @@ export default function ImageUpload({
         {imageDataUrl || svgText ? (
           <div className="relative">
             {imageDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageDataUrl} alt="Uploaded outline" className="mx-auto max-h-40 object-contain" />
+              <div className="flex gap-2 justify-center items-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageDataUrl} alt="Original" className="max-h-32 max-w-[48%] object-contain" />
+                <canvas ref={canvasRef} className="max-h-32 max-w-[48%]" />
+              </div>
             ) : (
               <div
                 className="mx-auto max-h-40 overflow-hidden [&>svg]:max-h-40 [&>svg]:mx-auto [&>svg]:block"
@@ -130,6 +194,37 @@ export default function ImageUpload({
           </button>
         )}
       </div>
+
+      {imageDataUrl && !svgText && onThresholdChange && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-sm text-gray-600">
+            <span>Threshold</span>
+            <span ref={labelRef}>{threshold}</span>
+          </div>
+          <input
+            ref={sliderRef}
+            type="range"
+            min={1}
+            max={255}
+            defaultValue={threshold}
+            onPointerDown={() => {
+              isDraggingRef.current = true;
+              localThresholdRef.current = threshold;
+            }}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              localThresholdRef.current = v;
+              drawThreshold(v);
+              if (!isDraggingRef.current) onThresholdChange(v);
+            }}
+            onPointerUp={() => {
+              isDraggingRef.current = false;
+              onThresholdChange(localThresholdRef.current);
+            }}
+            className="w-full accent-amber-500"
+          />
+        </div>
+      )}
     </div>
   );
 }
