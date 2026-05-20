@@ -237,7 +237,7 @@ function useEffectiveSettings(
     : 10;
 
   const effectiveDims = useMemo(() => {
-    if (!settings.autoSize) return { width: settings.width, height: settings.height };
+    if (settings.fitDimension === "off") return { width: settings.width, height: settings.height };
 
     const hasTexts = texts.length > 0 && fontsReady;
     if (!hasTexts && !sourceAspectRatio) return { width: settings.width, height: settings.height };
@@ -270,7 +270,7 @@ function useEffectiveSettings(
 
     return { width: settings.width, height: settings.height };
   }, [
-    settings.autoSize, settings.fitDimension, settings.height, settings.width,
+    settings.fitDimension, settings.height, settings.width,
     minDim, sourceAspectRatio, texts, fontsReady, hasImage,
   ]);
 

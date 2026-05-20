@@ -37,53 +37,29 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
 
       <fieldset className="space-y-3">
         <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Dimensions</legend>
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700">Auto-size</label>
-          <button
-            onClick={() => update({ autoSize: !settings.autoSize })}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              settings.autoSize ? "bg-amber-700" : "bg-gray-300"
-            }`}
-          >
-            <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-              settings.autoSize ? "translate-x-4.5" : "translate-x-0.5"
-            }`} />
-          </button>
+        <div className="flex items-center gap-1 text-sm">
+          <span className="text-sm font-medium text-gray-700 mr-2">Fit to</span>
+          {(["width", "height", "off"] as const).map((dim) => (
+            <button
+              key={dim}
+              onClick={() => update({ fitDimension: dim })}
+              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                settings.fitDimension === dim
+                  ? "bg-amber-700 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {dim === "off" ? "Manual" : dim.charAt(0).toUpperCase() + dim.slice(1)}
+            </button>
+          ))}
         </div>
-        {settings.autoSize && (
-          <div className="flex items-center gap-1 text-sm">
-            <span className="text-sm font-medium text-gray-700 mr-2">Fit to</span>
-            <button
-              onClick={() => update({ fitDimension: "width", width: settings.width })}
-              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                settings.fitDimension === "width"
-                  ? "bg-amber-700 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Width
-            </button>
-            <button
-              onClick={() => update({ fitDimension: "height", height: settings.height })}
-              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                settings.fitDimension === "height"
-                  ? "bg-amber-700 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Height
-            </button>
-          </div>
-        )}
         <SliderInput label="Width" unit="mm" value={settings.width} min={minSize} max={200} step={1}
           onChange={(v) => update({ width: v })}
-          disabled={settings.autoSize && settings.fitDimension === "height"}
+          disabled={settings.fitDimension === "height"}
         />
         <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
-          onChange={(v) => settings.autoSize && settings.fitDimension === "height"
-            ? update({ height: v })
-            : update({ height: v, autoSize: false })}
-          disabled={settings.autoSize && settings.fitDimension === "width"} />
+          onChange={(v) => update({ height: v })}
+          disabled={settings.fitDimension === "width"} />
         <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
           onChange={(v) => update({ margin: v })} />
         <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}

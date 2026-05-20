@@ -14,7 +14,7 @@ export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
   segments: 48,
 };
 
-export type FitDimension = "width" | "height";
+export type FitDimension = "width" | "height" | "off";
 
 export interface StampSettings {
   width: number; // mm
@@ -22,7 +22,6 @@ export interface StampSettings {
   baseThickness: number; // mm — the flat backing
   impressionDepth: number; // mm — how deep/tall the design features are
   cornerRadius: number; // mm — rounded rectangle corners
-  autoSize: boolean;
   fitDimension: FitDimension;
   margin: number; // mm — extra base material around the design
   simplification: number; // 0–1, controls raster trace detail
@@ -38,7 +37,6 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   baseThickness: 10.0,
   impressionDepth: 5,
   cornerRadius: 3,
-  autoSize: true,
   fitDimension: "width",
   margin: 4,
   simplification: 0.5,
