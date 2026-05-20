@@ -288,7 +288,42 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     if (y % 50 === 0) report(0.15 * (y / height), "Building pixel grid…");
   }
 
-  let contours = marchingSquares(grid, width, height, report);
+  report(0.15, "Trimming whitespace…");
+
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width;
+    for (let x = 0; x < width; x++) {
+      if (grid[rowStart + x] === 1) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  let trimmedGrid = grid;
+  let trimW = width;
+  let trimH = height;
+
+  if (maxX >= 0) {
+    const pad = 2;
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(width - 1, maxX + pad);
+    maxY = Math.min(height - 1, maxY + pad);
+    trimW = maxX - minX + 1;
+    trimH = maxY - minY + 1;
+    trimmedGrid = new Uint8Array(trimW * trimH);
+    for (let y = 0; y < trimH; y++) {
+      const srcOff = (y + minY) * width + minX;
+      const dstOff = y * trimW;
+      trimmedGrid.set(grid.subarray(srcOff, srcOff + trimW), dstOff);
+    }
+  }
+
+  let contours = marchingSquares(trimmedGrid, trimW, trimH, report);
 
   report(0.70, "Simplifying…");
 
@@ -306,10 +341,10 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
   report(0.90, "Nesting contours…");
 
   const flipped = contours.map((contour) =>
-    contour.map((p) => ({ x: p.x, y: height - p.y })),
+    contour.map((p) => ({ x: p.x, y: trimH - p.y })),
   );
 
   const shapes = nestContours(flipped);
 
-  post({ type: "result", shapes, imageWidth: width, imageHeight: height } as TraceMessage);
+  post({ type: "result", shapes, imageWidth: trimW, imageHeight: trimH } as TraceMessage);
 };
