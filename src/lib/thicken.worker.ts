@@ -206,6 +206,27 @@ function pointInContour(px: number, py: number, contour: Point[]): boolean {
   return inside;
 }
 
+function resampleContour(points: Point[], maxSegLen: number): Point[] {
+  if (points.length < 2) return points;
+  const result: Point[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const p0 = points[i];
+    const p1 = points[(i + 1) % points.length];
+    result.push(p0);
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > maxSegLen) {
+      const segments = Math.ceil(dist / maxSegLen);
+      for (let j = 1; j < segments; j++) {
+        const t = j / segments;
+        result.push({ x: p0.x + dx * t, y: p0.y + dy * t });
+      }
+    }
+  }
+  return result;
+}
+
 function taubinSmooth(points: Point[], iterations: number): Point[] {
   if (points.length < 3) return points;
   const lambda = 0.5;
@@ -411,8 +432,9 @@ function traceAndSimplify(
   }
 
   const TAUBIN_ITERATIONS = 12;
+  const RESAMPLE_MAX_SEG = 0.3;
   const finalContours = smoothEnabled
-    ? contours.map((c) => taubinSmooth(c, TAUBIN_ITERATIONS))
+    ? contours.map((c) => taubinSmooth(resampleContour(c, RESAMPLE_MAX_SEG), TAUBIN_ITERATIONS))
     : contours;
 
   return nestContoursToShapes(finalContours);
@@ -469,16 +491,17 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   const sqDistToBg = squaredEDT(initEDT(mask, n, false), gridW, gridH);
 
-  // Optionally dilate thin image features
-  let didThicken = false;
+  // Build skeleton for thin-feature thickening (computed globally, applied per-group)
+  let skeleton: Uint8Array | null = null;
+  let radiusSq = 0;
   if (thickenEnabled) {
     post({ type: "progress", progress: 0.25, stage: "Finding thin features…" } as ThickenMessage);
 
     const radiusPx = nozzleDiameter / 2 / RESOLUTION;
-    const radiusSq = radiusPx * radiusPx;
+    radiusSq = radiusPx * radiusPx;
     const thin = detectThinPixels(mask, sqDistToBg, gridW, gridH, radiusSq);
 
-    const skeleton = new Uint8Array(n);
+    const skel = new Uint8Array(n);
     let hasSkeleton = false;
     for (let y = 0; y < gridH; y++) {
       for (let x = 0; x < gridW; x++) {
@@ -496,47 +519,30 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
             if (mask[ni] && sqDistToBg[ni] > val) isMax = false;
           }
         }
-        if (isMax) { skeleton[i] = 1; hasSkeleton = true; }
+        if (isMax) { skel[i] = 1; hasSkeleton = true; }
       }
     }
 
-    if (hasSkeleton) {
-      post({ type: "progress", progress: 0.35, stage: "Thickening…" } as ThickenMessage);
-      const sqDistToSkel = squaredEDT(initEDT(skeleton, n, true), gridW, gridH);
-      for (let i = 0; i < n; i++) {
-        if (!imageMask[i] && !textMask[i] && sqDistToSkel[i] <= radiusSq) {
-          imageMask[i] = 1;
-        }
-      }
-      didThicken = true;
-    }
+    if (hasSkeleton) skeleton = skel;
   }
 
+  // Detect overlapping shapes via union-find — only merge groups that
+  // share boundary pixels (coincident walls), keep isolated shapes as-is
+  // to preserve thin gaps between them
   post({ type: "progress", progress: 0.5, stage: "Analyzing shape boundaries…" } as ThickenMessage);
 
-  let resultShapes: ShapeData[];
-  let shapesModified: boolean;
+  const uf = new Int16Array(imageShapes.length);
+  for (let i = 0; i < uf.length; i++) uf[i] = i;
+  const ufFind = (x: number): number => {
+    while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x]; }
+    return x;
+  };
+  const ufUnion = (a: number, b: number) => {
+    const ra = ufFind(a), rb = ufFind(b);
+    if (ra !== rb) uf[ra] = rb;
+  };
 
-  if (didThicken) {
-    // Thickening modified the mask — retrace all image shapes
-    const merged = traceAndSimplify(imageMask, gridW, gridH, stampHeight, smoothEnabled, border);
-    resultShapes = [...merged, ...textShapes];
-    shapesModified = true;
-  } else if (imageShapes.length > 1) {
-    // Detect overlapping shapes via union-find — only merge groups that
-    // share boundary pixels (coincident walls), keep isolated shapes as-is
-    // to preserve thin gaps between them
-    const uf = new Int16Array(imageShapes.length);
-    for (let i = 0; i < uf.length; i++) uf[i] = i;
-    const ufFind = (x: number): number => {
-      while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x]; }
-      return x;
-    };
-    const ufUnion = (a: number, b: number) => {
-      const ra = ufFind(a), rb = ufFind(b);
-      if (ra !== rb) uf[ra] = rb;
-    };
-
+  if (imageShapes.length > 1) {
     const firstOwner = new Int16Array(n).fill(-1);
     for (let si = 0; si < shapeMasks.length; si++) {
       const sm = shapeMasks[si];
@@ -549,48 +555,86 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
         }
       }
     }
+  }
 
-    const groups = new Map<number, number[]>();
-    for (let si = 0; si < imageShapes.length; si++) {
-      const root = ufFind(si);
-      if (!groups.has(root)) groups.set(root, []);
-      groups.get(root)!.push(si);
-    }
+  const groups = new Map<number, number[]>();
+  for (let si = 0; si < imageShapes.length; si++) {
+    const root = ufFind(si);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(si);
+  }
 
-    let anyMerge = false;
-    const mergedImageShapes: ShapeData[] = [];
-    for (const [, members] of groups) {
-      if (members.length === 1) {
-        mergedImageShapes.push(imageShapes[members[0]]);
-      } else {
-        anyMerge = true;
-        const groupMask = new Uint8Array(n);
-        for (const si of members) {
-          const sm = shapeMasks[si];
-          for (let i = 0; i < n; i++) {
-            if (sm[i]) groupMask[i] = 1;
-          }
-        }
-        mergedImageShapes.push(
-          ...traceAndSimplify(groupMask, gridW, gridH, stampHeight, smoothEnabled, border),
-        );
+  // Process each overlap group: merge multi-shape groups via retrace,
+  // apply per-group thickening with gap exclusion, keep untouched singletons as-is
+  let anyMerge = false;
+  let anyThicken = false;
+  const mergedImageShapes: ShapeData[] = [];
+
+  for (const [, members] of groups) {
+    const groupMask = new Uint8Array(n);
+    for (const si of members) {
+      const sm = shapeMasks[si];
+      for (let i = 0; i < n; i++) {
+        if (sm[i]) groupMask[i] = 1;
       }
     }
 
-    if (anyMerge) {
-      resultShapes = [...mergedImageShapes, ...textShapes];
-      shapesModified = true;
-    } else {
-      resultShapes = [];
-      shapesModified = false;
+    let groupThickened = false;
+    if (skeleton) {
+      let hasGroupSkel = false;
+      const groupSkel = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        if (skeleton[i] && groupMask[i]) { groupSkel[i] = 1; hasGroupSkel = true; }
+      }
+      if (hasGroupSkel) {
+        post({ type: "progress", progress: 0.55, stage: "Thickening…" } as ThickenMessage);
+        const sqDist = squaredEDT(initEDT(groupSkel, n, true), gridW, gridH);
+
+        // Compute distance to other groups' shapes so dilation doesn't
+        // extend into gaps between separate design elements
+        const otherMask = new Uint8Array(n);
+        let hasOther = false;
+        for (let i = 0; i < n; i++) {
+          if (imageMask[i] && !groupMask[i]) { otherMask[i] = 1; hasOther = true; }
+        }
+        const sqDistToOther = hasOther
+          ? squaredEDT(initEDT(otherMask, n, true), gridW, gridH)
+          : null;
+
+        for (let i = 0; i < n; i++) {
+          if (!groupMask[i] && !textMask[i] && sqDist[i] <= radiusSq) {
+            if (!sqDistToOther || sqDistToOther[i] > radiusSq) {
+              groupMask[i] = 1;
+              groupThickened = true;
+            }
+          }
+        }
+        if (groupThickened) anyThicken = true;
+      }
     }
+
+    if (members.length > 1 || groupThickened) {
+      anyMerge = true;
+      mergedImageShapes.push(
+        ...traceAndSimplify(groupMask, gridW, gridH, stampHeight, smoothEnabled, border),
+      );
+    } else {
+      mergedImageShapes.push(imageShapes[members[0]]);
+    }
+  }
+
+  let resultShapes: ShapeData[];
+  let shapesModified: boolean;
+  if (anyMerge) {
+    resultShapes = [...mergedImageShapes, ...textShapes];
+    shapesModified = true;
   } else {
     resultShapes = [];
     shapesModified = false;
   }
 
   post({ type: "progress", progress: 0.8, stage: "Detecting thin features…" } as ThickenMessage);
-  const thinFeatureMap = didThicken
+  const thinFeatureMap = anyThicken
     ? (textShapes.length > 0
         ? buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border, textMask)
         : emptyThinFeatureMap(stampWidth, stampHeight))
