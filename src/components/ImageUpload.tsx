@@ -66,7 +66,7 @@ export default function ImageUpload({
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
         onClick={() => !isProcessing && inputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+        className={`relative border-2 border-dashed rounded-lg p-4 sm:p-6 text-center transition-colors ${
           isProcessing
             ? "border-amber-400 cursor-wait"
             : "border-gray-300 cursor-pointer hover:border-amber-500"

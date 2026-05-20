@@ -198,8 +198,8 @@ function StampPreview({ settings, shapes, exportName }: Props) {
   }
 
   return (
-    <div className="sticky top-6 flex flex-col" style={{ height: "calc(100vh - 120px)" }}>
-      <div className="relative bg-gray-900 rounded-lg overflow-hidden flex-1">
+    <div className="flex flex-col h-[60vh] lg:sticky lg:top-6 lg:h-[calc(100vh-120px)]">
+      <div className="relative bg-gray-900 rounded-lg overflow-hidden flex-1 min-h-0">
         <Canvas camera={{ position: [60, 60, 60], fov: 45 }}>
           <ambientLight intensity={0.5} />
           <directionalLight position={[50, 50, 50]} intensity={1} />
@@ -209,17 +209,17 @@ function StampPreview({ settings, shapes, exportName }: Props) {
           <gridHelper args={[200, 20, 0x444444, 0x222222]} rotation={[Math.PI / 2, 0, 0]} />
         </Canvas>
 
-        <div className="absolute bottom-3 right-3 flex gap-2">
+        <div className="absolute bottom-2 left-2 right-2 flex justify-end gap-2 sm:left-auto sm:bottom-3 sm:right-3">
           <button
             onClick={handleExportStamp}
-            className="px-3 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-sm backdrop-blur-sm"
+            className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm"
           >
             Export Stamp STL
           </button>
           {settings.threadEnabled && (
             <button
               onClick={handleExportHandle}
-              className="px-3 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-sm backdrop-blur-sm"
+              className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm"
             >
               Export Handle STL
             </button>

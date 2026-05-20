@@ -148,7 +148,7 @@ export default function StampSettingsPanel({ settings, onChange, onFindMinWidth,
       <fieldset className="space-y-3 border-t pt-4">
         <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Handle Mount</legend>
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700">Handle Mount (M10×1.5)</label>
+          <label className="text-sm font-medium text-gray-700 min-w-0">Handle Mount (M10×1.5)</label>
           <button
             onClick={() => {
               const enabling = !settings.threadEnabled;

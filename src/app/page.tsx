@@ -63,9 +63,9 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <header className="bg-amber-800 text-white px-6 py-4">
-        <h1 className="text-xl font-bold">Ceramic Stamps</h1>
-        <p className="text-amber-200 text-sm">Design and export 3D-printable ceramic stamps</p>
+      <header className="bg-amber-800 text-white px-3 py-3 sm:px-6 sm:py-4">
+        <h1 className="text-lg sm:text-xl font-bold">Ceramic Stamps</h1>
+        <p className="text-amber-200 text-xs sm:text-sm">Design and export 3D-printable ceramic stamps</p>
       </header>
 
       <PipelineToast
@@ -75,12 +75,12 @@ export default function Home() {
         isAutoFitting={pipeline.isAutoFitting}
       />
 
-      <div className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-        <section>
+      <div className="max-w-7xl mx-auto p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 sm:gap-6">
+        <section className="order-2 lg:order-1">
           <StampPreview settings={pipeline.effectiveSettings} shapes={pipeline.shapes} exportName={exportName} />
         </section>
 
-        <aside className="space-y-4">
+        <aside className="space-y-4 order-1 lg:order-2">
           <ImageUpload
             imageDataUrl={imageDataUrl}
             svgText={svgText}

@@ -18,7 +18,7 @@ export default function PipelineToast({ isProcessing, pipelineProgress, pipeline
   const progress = isAutoFitting && !isProcessing ? -1 : pipelineProgress;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 w-64">
+    <div className="fixed bottom-3 left-3 right-3 z-50 bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 sm:right-auto sm:w-64">
       <p className="text-sm font-medium text-gray-700 mb-2">{label}</p>
       {progress < 0 ? (
         <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">

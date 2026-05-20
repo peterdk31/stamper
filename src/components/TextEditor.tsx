@@ -49,18 +49,18 @@ export default function TextEditor({
 
   return (
     <div className="p-4 bg-white rounded-lg shadow space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold">Text</h2>
         <div className="flex gap-2">
           <button
             onClick={() => fontInputRef.current?.click()}
-            className="text-sm px-2 py-1 bg-gray-100 rounded hover:bg-gray-200"
+            className="text-sm px-2 py-1.5 bg-gray-100 rounded hover:bg-gray-200"
           >
             Upload Font
           </button>
           <button
             onClick={addText}
-            className="text-sm px-2 py-1 bg-gray-100 rounded hover:bg-gray-200"
+            className="text-sm px-2 py-1.5 bg-gray-100 rounded hover:bg-gray-200"
           >
             + Add Text
           </button>
