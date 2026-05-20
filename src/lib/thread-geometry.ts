@@ -68,14 +68,23 @@ export function createFemaleThreadGeometry(config: ThreadConfig): THREE.BufferGe
     }
   }
 
-  const bottomCenter = vertices.length / 3;
-  vertices.push(0, 0, 0);
-  for (let j = 0; j <= segments; j++) {
-    const segAngle = (j / segments) * Math.PI * 2;
-    vertices.push(Math.cos(segAngle) * outerR, Math.sin(segAngle) * outerR, 0);
-  }
   for (let j = 0; j < segments; j++) {
-    indices.push(bottomCenter, bottomCenter + 1 + ((j + 1) % (segments + 1)), bottomCenter + 1 + j);
+    const ij = j * 2;
+    const oj = j * 2 + 1;
+    const ij1 = (j + 1) * 2;
+    const oj1 = (j + 1) * 2 + 1;
+    indices.push(ij, oj1, oj);
+    indices.push(ij, ij1, oj1);
+  }
+
+  const topRow = totalZSteps * ringSize;
+  for (let j = 0; j < segments; j++) {
+    const ij = topRow + j * 2;
+    const oj = topRow + j * 2 + 1;
+    const ij1 = topRow + (j + 1) * 2;
+    const oj1 = topRow + (j + 1) * 2 + 1;
+    indices.push(ij, oj, oj1);
+    indices.push(ij, oj1, ij1);
   }
 
   const geo = new THREE.BufferGeometry();
