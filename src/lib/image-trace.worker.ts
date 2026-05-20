@@ -229,7 +229,7 @@ function marchingSquares(
       cur = next;
     }
 
-    if (ids.length < 3) continue;
+    if (ids.length < 3 || cur !== start) continue;
 
     const points: Point[] = new Array(ids.length);
     for (let i = 0; i < ids.length; i++) {
@@ -323,7 +323,26 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     }
   }
 
-  let contours = marchingSquares(trimmedGrid, trimW, trimH, report);
+  // Pad grid with 1px zero border so contours touching image edges close properly.
+  // Without this, boundary edge points get only 1 link and produce open chains.
+  const padW = trimW + 2;
+  const padH = trimH + 2;
+  const paddedGrid = new Uint8Array(padW * padH);
+  for (let y = 0; y < trimH; y++) {
+    paddedGrid.set(
+      trimmedGrid.subarray(y * trimW, y * trimW + trimW),
+      (y + 1) * padW + 1,
+    );
+  }
+
+  let contours = marchingSquares(paddedGrid, padW, padH, report);
+
+  for (const contour of contours) {
+    for (const p of contour) {
+      p.x -= 1;
+      p.y -= 1;
+    }
+  }
 
   report(0.70, "Simplifying…");
 
@@ -335,7 +354,14 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
       if (s.length >= 3) simplified.push(s);
       if (i % 20 === 0) report(0.70 + 0.20 * (i / total), "Simplifying…");
     }
-    contours = simplified;
+    const minArea = Math.max(4, trimW * trimH * 0.00005);
+    contours = simplified.filter((c) => Math.abs(signedArea(c)) >= minArea);
+
+    const MAX_CONTOURS = 500;
+    if (contours.length > MAX_CONTOURS) {
+      contours.sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)));
+      contours.length = MAX_CONTOURS;
+    }
   }
 
   report(0.90, "Nesting contours…");
