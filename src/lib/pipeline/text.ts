@@ -29,7 +29,7 @@ export function textToDesignData(
     return { textData: null, imageZone: layout.imageZone };
   }
 
-  const shapeData = shapesToDesignData(shapes);
+  const shapeData = shapesToDesignData(shapes, "text");
   return {
     textData: {
       shapes: shapeData,

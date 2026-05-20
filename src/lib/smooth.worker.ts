@@ -6,6 +6,7 @@ interface Point {
 interface ShapeData {
   outer: Point[];
   holes: Point[][];
+  source?: "image" | "text";
 }
 
 interface BoundsData {
@@ -42,7 +43,10 @@ self.onmessage = (e: MessageEvent<SmoothRequest>) => {
   const { shapes } = e.data;
   const post = self.postMessage.bind(self);
 
-  let current = shapes;
+  const imageShapes = shapes.filter((s) => s.source !== "text");
+  const textShapes = shapes.filter((s) => s.source === "text");
+
+  let current = imageShapes;
 
   for (let iter = 0; iter < ITERATIONS; iter++) {
     post({ type: "progress", progress: iter / ITERATIONS } as SmoothMessage);
@@ -50,8 +54,11 @@ self.onmessage = (e: MessageEvent<SmoothRequest>) => {
     current = current.map((shape) => ({
       outer: chaikinSmooth(shape.outer),
       holes: shape.holes.map((h) => chaikinSmooth(h)),
+      source: shape.source,
     }));
   }
+
+  current = [...current, ...textShapes];
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of current) {

@@ -63,7 +63,7 @@ export interface StampProject {
 }
 
 export interface StampPoint { x: number; y: number }
-export interface StampShapeData { outer: StampPoint[]; holes: StampPoint[][] }
+export interface StampShapeData { outer: StampPoint[]; holes: StampPoint[][]; source?: "image" | "text" }
 export interface ThinFeatureMap {
   hasThinFeatures: boolean;
   pixels: Uint8Array;

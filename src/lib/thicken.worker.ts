@@ -8,6 +8,7 @@ interface Point {
 interface ShapeData {
   outer: Point[];
   holes: Point[][];
+  source?: "image" | "text";
 }
 
 interface BoundsData {
@@ -425,6 +426,9 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled, smoothEnabled } = e.data;
   const post = self.postMessage.bind(self);
 
+  const imageShapes = shapes.filter((s) => s.source !== "text");
+  const textShapes = shapes.filter((s) => s.source === "text");
+
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);
 
   const border = Math.ceil(nozzleDiameter / 2 / RESOLUTION) + 2;
@@ -435,14 +439,22 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const tmp = new OffscreenCanvas(gridW, gridH);
   const tctx = tmp.getContext("2d")!;
 
-  // Rasterize each shape individually so we can track ownership
+  // Rasterize all shapes into the mask for thin-feature detection,
+  // but only track per-shape ownership for image shapes (text is never re-traced)
   const shapeMasks: Uint8Array[] = [];
   const mask = new Uint8Array(n);
-  for (const shape of shapes) {
+  for (const shape of imageShapes) {
     const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
     shapeMasks.push(sm);
     for (let i = 0; i < n; i++) {
       if (sm[i]) mask[i] = 1;
+    }
+  }
+  const textMask = new Uint8Array(n);
+  for (const shape of textShapes) {
+    const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
+    for (let i = 0; i < n; i++) {
+      if (sm[i]) { mask[i] = 1; textMask[i] = 1; }
     }
   }
 
@@ -502,7 +514,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   for (let y = 0; y < gridH; y++) {
     for (let x = 0; x < gridW; x++) {
       const i = y * gridW + x;
-      if (!thin[i]) continue;
+      if (!thin[i] || textMask[i]) continue;
 
       const val = sqDistToBg[i];
       let isMax = true;
@@ -549,8 +561,8 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
         break;
       }
     }
-    // Include dilation around skeleton (new material)
-    if (!thickenMask[i] && sqDistToSkel[i] <= radiusSq) {
+    // Include dilation around skeleton (new material), but not into text regions
+    if (!thickenMask[i] && !textMask[i] && sqDistToSkel[i] <= radiusSq) {
       thickenMask[i] = 1;
     }
   }
@@ -559,14 +571,15 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   const thickenedShapes = traceAndSimplify(thickenMask, gridW, gridH, stampHeight, smoothEnabled, border);
 
-  // Combine: unchanged shapes + re-traced thickened shapes
+  // Combine: unchanged image shapes + re-traced thickened shapes + text shapes (untouched)
   const resultShapes: ShapeData[] = [];
-  for (let si = 0; si < shapes.length; si++) {
+  for (let si = 0; si < imageShapes.length; si++) {
     if (!shapesNeedThicken.has(si)) {
-      resultShapes.push(shapes[si]);
+      resultShapes.push(imageShapes[si]);
     }
   }
   resultShapes.push(...thickenedShapes);
+  resultShapes.push(...textShapes);
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of resultShapes) {

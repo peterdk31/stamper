@@ -34,6 +34,7 @@ export function rasterToDesignData(
   const shapes: StampShapeData[] = rawShapes.map((s) => ({
     outer: s.outer.map(scalePoint),
     holes: s.holes.map((h) => h.map(scalePoint)),
+    source: "image" as const,
   }));
 
   return {
@@ -65,9 +66,10 @@ export function designDataToShapes(data: DesignData): THREE.Shape[] {
   return result;
 }
 
-export function shapesToDesignData(shapes: THREE.Shape[]): StampShapeData[] {
+export function shapesToDesignData(shapes: THREE.Shape[], source?: "image" | "text"): StampShapeData[] {
   return shapes.map((s) => ({
     outer: s.getPoints(48).map((p) => ({ x: p.x, y: p.y })),
     holes: s.holes.map((h) => h.getPoints(48).map((p) => ({ x: p.x, y: p.y }))),
+    ...(source && { source }),
   }));
 }
