@@ -38,6 +38,7 @@ export type ThickenMessage =
 const RESOLUTION = 0.05; // mm per pixel
 const DETECT_RESOLUTION = 0.1; // mm per pixel for thin-feature texture
 const MIN_THIN_PIXELS = 20;
+const GAP_CLOSE_FACTOR = 0.14; // close radius = factor * nozzleDiameter
 
 function perpendicularDistance(point: Point, lineStart: Point, lineEnd: Point): number {
   const dx = lineEnd.x - lineStart.x;
@@ -440,6 +441,26 @@ function traceAndSimplify(
   return nestContoursToShapes(finalContours);
 }
 
+function morphologicalClose(
+  mask: Uint8Array,
+  gridW: number,
+  gridH: number,
+  closeRadiusSq: number,
+): Uint8Array {
+  const n = gridW * gridH;
+  const sqDistToFg = squaredEDT(initEDT(mask, n, true), gridW, gridH);
+  const dilated = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (sqDistToFg[i] <= closeRadiusSq) dilated[i] = 1;
+  }
+  const sqDistToBgInDilated = squaredEDT(initEDT(dilated, n, false), gridW, gridH);
+  const closed = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (mask[i] || sqDistToBgInDilated[i] > closeRadiusSq) closed[i] = 1;
+  }
+  return closed;
+}
+
 function emptyThinFeatureMap(stampWidth: number, stampHeight: number): ThinFeatureMapData {
   const outW = Math.ceil(stampWidth / DETECT_RESOLUTION) + 1;
   const outH = Math.ceil(stampHeight / DETECT_RESOLUTION) + 1;
@@ -460,7 +481,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);
 
-  const border = Math.ceil(nozzleDiameter / 2 / RESOLUTION) + 2;
+  const border = Math.ceil(Math.max(nozzleDiameter / 2, GAP_CLOSE_FACTOR * nozzleDiameter) / RESOLUTION) + 2;
   const gridW = Math.ceil(stampWidth / RESOLUTION) + border * 2;
   const gridH = Math.ceil(stampHeight / RESOLUTION) + border * 2;
   const n = gridW * gridH;
@@ -478,7 +499,17 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     }
   }
 
-  const mask = new Uint8Array(imageMask);
+  const closeRadiusPx = GAP_CLOSE_FACTOR * nozzleDiameter / RESOLUTION;
+  const closeRadiusSq = closeRadiusPx * closeRadiusPx;
+  let closedImageMask: Uint8Array;
+  if (imageShapes.length > 0 && closeRadiusPx >= 1) {
+    post({ type: "progress", progress: 0.05, stage: "Bridging micro-gaps…" } as ThickenMessage);
+    closedImageMask = morphologicalClose(imageMask, gridW, gridH, closeRadiusSq);
+  } else {
+    closedImageMask = imageMask;
+  }
+
+  const mask = new Uint8Array(closedImageMask);
   const textMask = new Uint8Array(n);
   for (const shape of textShapes) {
     const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
@@ -526,54 +557,62 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     if (hasSkeleton) skeleton = skel;
   }
 
-  // Detect overlapping shapes via union-find — only merge groups that
-  // share boundary pixels (coincident walls), keep isolated shapes as-is
-  // to preserve thin gaps between them
-  post({ type: "progress", progress: 0.5, stage: "Analyzing shape boundaries…" } as ThickenMessage);
+  // Group shapes via connected-component labeling on closedImageMask.
+  // Shapes bridged by the morphological close end up in the same component.
+  post({ type: "progress", progress: 0.5, stage: "Analyzing shape groups…" } as ThickenMessage);
 
-  const uf = new Int16Array(imageShapes.length);
-  for (let i = 0; i < uf.length; i++) uf[i] = i;
-  const ufFind = (x: number): number => {
-    while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x]; }
+  const ccParent = new Int32Array(n);
+  for (let i = 0; i < n; i++) ccParent[i] = i;
+  const ccFind = (x: number): number => {
+    while (ccParent[x] !== x) { ccParent[x] = ccParent[ccParent[x]]; x = ccParent[x]; }
     return x;
   };
-  const ufUnion = (a: number, b: number) => {
-    const ra = ufFind(a), rb = ufFind(b);
-    if (ra !== rb) uf[ra] = rb;
+  const ccUnion = (a: number, b: number) => {
+    const ra = ccFind(a), rb = ccFind(b);
+    if (ra !== rb) ccParent[ra] = rb;
   };
 
-  if (imageShapes.length > 1) {
-    const firstOwner = new Int16Array(n).fill(-1);
-    for (let si = 0; si < shapeMasks.length; si++) {
-      const sm = shapeMasks[si];
-      for (let i = 0; i < n; i++) {
-        if (!sm[i]) continue;
-        if (firstOwner[i] === -1) {
-          firstOwner[i] = si;
-        } else {
-          ufUnion(firstOwner[i], si);
-        }
-      }
+  for (let y = 0; y < gridH; y++) {
+    for (let x = 0; x < gridW; x++) {
+      const i = y * gridW + x;
+      if (!closedImageMask[i]) continue;
+      if (x + 1 < gridW && closedImageMask[i + 1]) ccUnion(i, i + 1);
+      if (y + 1 < gridH && closedImageMask[i + gridW]) ccUnion(i, i + gridW);
+    }
+  }
+
+  const shapeToComp = new Array<number>(imageShapes.length);
+  for (let si = 0; si < shapeMasks.length; si++) {
+    shapeToComp[si] = -1;
+    const sm = shapeMasks[si];
+    for (let i = 0; i < n; i++) {
+      if (sm[i]) { shapeToComp[si] = ccFind(i); break; }
     }
   }
 
   const groups = new Map<number, number[]>();
   for (let si = 0; si < imageShapes.length; si++) {
-    const root = ufFind(si);
-    if (!groups.has(root)) groups.set(root, []);
-    groups.get(root)!.push(si);
+    const comp = shapeToComp[si] >= 0 ? shapeToComp[si] : -(si + 1);
+    if (!groups.has(comp)) groups.set(comp, []);
+    groups.get(comp)!.push(si);
   }
 
-  // Process each overlap group: merge multi-shape groups via retrace,
-  // apply per-group thickening with gap exclusion, keep untouched singletons as-is
   let anyMerge = false;
   let anyThicken = false;
   const mergedImageShapes: ShapeData[] = [];
 
-  for (const [, members] of groups) {
+  for (const [compKey, members] of groups) {
     const groupMask = new Uint8Array(n);
-    for (const si of members) {
-      const sm = shapeMasks[si];
+    let hasNewPixels = false;
+    if (compKey >= 0) {
+      for (let i = 0; i < n; i++) {
+        if (closedImageMask[i] && ccFind(i) === compKey) {
+          groupMask[i] = 1;
+          if (!imageMask[i]) hasNewPixels = true;
+        }
+      }
+    } else {
+      const sm = shapeMasks[members[0]];
       for (let i = 0; i < n; i++) {
         if (sm[i]) groupMask[i] = 1;
       }
@@ -590,12 +629,10 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
         post({ type: "progress", progress: 0.55, stage: "Thickening…" } as ThickenMessage);
         const sqDist = squaredEDT(initEDT(groupSkel, n, true), gridW, gridH);
 
-        // Compute distance to other groups' shapes so dilation doesn't
-        // extend into gaps between separate design elements
         const otherMask = new Uint8Array(n);
         let hasOther = false;
         for (let i = 0; i < n; i++) {
-          if (imageMask[i] && !groupMask[i]) { otherMask[i] = 1; hasOther = true; }
+          if (closedImageMask[i] && !groupMask[i]) { otherMask[i] = 1; hasOther = true; }
         }
         const sqDistToOther = hasOther
           ? squaredEDT(initEDT(otherMask, n, true), gridW, gridH)
@@ -613,7 +650,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
       }
     }
 
-    if (members.length > 1 || groupThickened) {
+    if (members.length > 1 || groupThickened || hasNewPixels) {
       anyMerge = true;
       mergedImageShapes.push(
         ...traceAndSimplify(groupMask, gridW, gridH, stampHeight, smoothEnabled, border),
