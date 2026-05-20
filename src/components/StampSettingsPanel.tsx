@@ -66,12 +66,10 @@ export default function StampSettingsPanel({ settings, onChange, onFindMinWidth,
             }`} />
           </button>
         </div>
-        {settings.autoSize && (
-          <SliderInput label="Padding" unit="mm" value={settings.padding} min={0} max={20} step={0.5}
-            onChange={(v) => update({ padding: v })} />
-        )}
+        <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
+          onChange={(v) => update({ margin: v })} />
         <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
-          min={0} max={Math.min(settings.width, settings.height) / 2} step={0.5}
+          min={0} max={(Math.min(settings.width, settings.height) + settings.margin * 2) / 2} step={0.5}
           onChange={(v) => update({ cornerRadius: v })} />
       </fieldset>
 

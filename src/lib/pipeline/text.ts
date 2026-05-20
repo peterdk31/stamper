@@ -13,10 +13,9 @@ export function textToDesignData(
   fontCache: Map<string, Font>,
   stampWidth: number,
   stampHeight: number,
-  padding: number,
   hasImage: boolean,
 ): TextLayoutOutput {
-  const layout = computeTextLayout(texts, fontCache, stampWidth, stampHeight, padding, hasImage);
+  const layout = computeTextLayout(texts, fontCache, stampWidth, stampHeight, hasImage);
 
   if (layout.placements.length === 0) {
     return {

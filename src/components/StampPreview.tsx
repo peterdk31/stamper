@@ -67,6 +67,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
       shapes: shapeData,
       width: settings.width,
       height: settings.height,
+      margin: settings.margin,
       baseThickness: settings.baseThickness,
       impressionDepth: settings.impressionDepth,
       cornerRadius: settings.cornerRadius,
@@ -78,7 +79,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
       worker.terminate();
       if (geoWorkerRef.current === worker) geoWorkerRef.current = null;
     };
-  }, [shapes, settings.width, settings.height, settings.baseThickness, settings.impressionDepth,
+  }, [shapes, settings.width, settings.height, settings.margin, settings.baseThickness, settings.impressionDepth,
       settings.cornerRadius, settings.threadEnabled, settings.threadConfig]);
 
   useEffect(() => {

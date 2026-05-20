@@ -242,7 +242,7 @@ function useEffectiveSettings(
     if (!hasTexts && !sourceAspectRatio) return settings.height;
 
     const required = hasTexts
-      ? computeRequiredHeight(texts, getFontCache(), settings.width, settings.padding, hasImage, sourceAspectRatio)
+      ? computeRequiredHeight(texts, getFontCache(), settings.width, hasImage, sourceAspectRatio)
       : null;
 
     if (required !== null) {
@@ -262,7 +262,7 @@ function useEffectiveSettings(
 
     return settings.height;
   }, [
-    settings.autoSize, settings.height, settings.width, settings.padding,
+    settings.autoSize, settings.height, settings.width,
     settings.threadEnabled, settings.threadConfig.majorDiameter,
     sourceAspectRatio, texts, fontsReady, hasImage,
   ]);
@@ -355,15 +355,15 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     if (!fontsReady || texts.length === 0) {
       return {
         textData: null as DesignData | null,
-        imageZone: { yMin: effectiveSettings.padding, yMax: effectiveSettings.height - effectiveSettings.padding },
+        imageZone: { yMin: 0, yMax: effectiveSettings.height },
       };
     }
     return textToDesignData(
       texts, getFontCache(),
-      effectiveSettings.width, effectiveSettings.height, effectiveSettings.padding,
+      effectiveSettings.width, effectiveSettings.height,
       hasImage,
     );
-  }, [texts, fontsReady, effectiveSettings.width, effectiveSettings.height, effectiveSettings.padding, hasImage]);
+  }, [texts, fontsReady, effectiveSettings.width, effectiveSettings.height, hasImage]);
 
   // 4. Image → DesignData (rendered within computed image zone)
   const imageData = useMemo<DesignData | null>(() => {

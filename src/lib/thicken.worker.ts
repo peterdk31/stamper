@@ -284,6 +284,7 @@ function buildThinFeatureMap(
   stampWidth: number,
   stampHeight: number,
   nozzleDiameter: number,
+  border: number,
 ): ThinFeatureMapData {
   const n = gridW * gridH;
   const rPx = nozzleDiameter / 2 / RESOLUTION;
@@ -302,10 +303,10 @@ function buildThinFeatureMap(
   if (hasThinFeatures) {
     for (let oy = 0; oy < outH; oy++) {
       const mmY = oy * DETECT_RESOLUTION;
-      const gy = Math.round((stampHeight - mmY) / RESOLUTION) + 1;
+      const gy = Math.round((stampHeight - mmY) / RESOLUTION) + border;
       for (let ox = 0; ox < outW; ox++) {
         const mmX = ox * DETECT_RESOLUTION;
-        const gx = Math.round(mmX / RESOLUTION) + 1;
+        const gx = Math.round(mmX / RESOLUTION) + border;
         if (gx >= 0 && gx < gridW && gy >= 0 && gy < gridH) {
           if (thin[gy * gridW + gx]) {
             const idx = (oy * outW + ox) * 4;
@@ -328,6 +329,7 @@ function rasterizeShape(
   gridW: number,
   gridH: number,
   stampHeight: number,
+  border: number,
 ): Uint8Array {
   const n = gridW * gridH;
   tctx.clearRect(0, 0, gridW, gridH);
@@ -336,9 +338,9 @@ function rasterizeShape(
   tctx.globalCompositeOperation = "source-over";
   tctx.fillStyle = "white";
   tctx.beginPath();
-  tctx.moveTo(shape.outer[0].x / RESOLUTION + 1, (stampHeight - shape.outer[0].y) / RESOLUTION + 1);
+  tctx.moveTo(shape.outer[0].x / RESOLUTION + border, (stampHeight - shape.outer[0].y) / RESOLUTION + border);
   for (let i = 1; i < shape.outer.length; i++) {
-    tctx.lineTo(shape.outer[i].x / RESOLUTION + 1, (stampHeight - shape.outer[i].y) / RESOLUTION + 1);
+    tctx.lineTo(shape.outer[i].x / RESOLUTION + border, (stampHeight - shape.outer[i].y) / RESOLUTION + border);
   }
   tctx.closePath();
   tctx.fill();
@@ -348,9 +350,9 @@ function rasterizeShape(
     for (const hole of shape.holes) {
       if (hole.length === 0) continue;
       tctx.beginPath();
-      tctx.moveTo(hole[0].x / RESOLUTION + 1, (stampHeight - hole[0].y) / RESOLUTION + 1);
+      tctx.moveTo(hole[0].x / RESOLUTION + border, (stampHeight - hole[0].y) / RESOLUTION + border);
       for (let i = 1; i < hole.length; i++) {
-        tctx.lineTo(hole[i].x / RESOLUTION + 1, (stampHeight - hole[i].y) / RESOLUTION + 1);
+        tctx.lineTo(hole[i].x / RESOLUTION + border, (stampHeight - hole[i].y) / RESOLUTION + border);
       }
       tctx.closePath();
       tctx.fill();
@@ -371,6 +373,7 @@ function traceAndSimplify(
   gridH: number,
   stampHeight: number,
   smoothEnabled: boolean,
+  border: number,
 ): ShapeData[] {
   const rawContours = marchingSquares(grid, gridW, gridH);
 
@@ -385,8 +388,8 @@ function traceAndSimplify(
     if (s.length < 3) continue;
 
     const mm = s.map((p) => ({
-      x: (p.x - 1) * RESOLUTION,
-      y: stampHeight - (p.y - 1) * RESOLUTION,
+      x: (p.x - border) * RESOLUTION,
+      y: stampHeight - (p.y - border) * RESOLUTION,
     }));
 
     const clean: Point[] = [mm[0]];
@@ -424,8 +427,9 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);
 
-  const gridW = Math.ceil(stampWidth / RESOLUTION) + 2;
-  const gridH = Math.ceil(stampHeight / RESOLUTION) + 2;
+  const border = Math.ceil(nozzleDiameter / 2 / RESOLUTION) + 2;
+  const gridW = Math.ceil(stampWidth / RESOLUTION) + border * 2;
+  const gridH = Math.ceil(stampHeight / RESOLUTION) + border * 2;
   const n = gridW * gridH;
 
   const tmp = new OffscreenCanvas(gridW, gridH);
@@ -435,7 +439,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const shapeMasks: Uint8Array[] = [];
   const mask = new Uint8Array(n);
   for (const shape of shapes) {
-    const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight);
+    const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
     shapeMasks.push(sm);
     for (let i = 0; i < n; i++) {
       if (sm[i]) mask[i] = 1;
@@ -451,7 +455,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   if (!thickenEnabled) {
     post({ type: "progress", progress: 0.5, stage: "Detecting thin features…" } as ThickenMessage);
-    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter);
+    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border);
 
     post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
     const result: ThickenMessage = {
@@ -481,7 +485,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   if (shapesNeedThicken.size === 0) {
     post({ type: "progress", progress: 0.5, stage: "Detecting thin features…" } as ThickenMessage);
-    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter);
+    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border);
     post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
     const noChangeResult: ThickenMessage = {
       type: "result", shapesModified: false,
@@ -520,7 +524,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   }
 
   if (!hasSkeleton) {
-    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter);
+    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border);
     post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
     const noChangeResult: ThickenMessage = {
       type: "result", shapesModified: false,
@@ -553,7 +557,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   post({ type: "progress", progress: 0.5, stage: "Tracing contours…" } as ThickenMessage);
 
-  const thickenedShapes = traceAndSimplify(thickenMask, gridW, gridH, stampHeight, smoothEnabled);
+  const thickenedShapes = traceAndSimplify(thickenMask, gridW, gridH, stampHeight, smoothEnabled, border);
 
   // Combine: unchanged shapes + re-traced thickened shapes
   const resultShapes: ShapeData[] = [];

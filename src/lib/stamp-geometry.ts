@@ -53,6 +53,9 @@ export function buildStampGeometry(
   shapes: THREE.Shape[],
 ): THREE.Group {
   const group = new THREE.Group();
+  const margin = settings.margin;
+  const physW = settings.width + margin * 2;
+  const physH = settings.height + margin * 2;
 
   const baseMat = new THREE.MeshStandardMaterial({ color: 0xd4a373 });
   const mirrored = shapes.length > 0 ? mirrorShapes(shapes, settings.width) : [];
@@ -63,9 +66,9 @@ export function buildStampGeometry(
     const majorR = settings.threadConfig.majorDiameter / 2;
     const threadDepth = Math.min(settings.threadConfig.height, baseBottomDepth);
 
-    const holedShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+    const holedShape = createRoundedRectShape(physW, physH, settings.cornerRadius);
     const holePath = new THREE.Path();
-    holePath.absarc(settings.width / 2, settings.height / 2, majorR, 0, Math.PI * 2, true);
+    holePath.absarc(physW / 2, physH / 2, majorR, 0, Math.PI * 2, true);
     holedShape.holes.push(holePath);
 
     const backGeo = new THREE.ExtrudeGeometry(holedShape, {
@@ -76,7 +79,7 @@ export function buildStampGeometry(
     group.add(new THREE.Mesh(backGeo, baseMat));
 
     if (threadDepth < baseBottomDepth) {
-      const frontShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+      const frontShape = createRoundedRectShape(physW, physH, settings.cornerRadius);
       const frontGeo = new THREE.ExtrudeGeometry(frontShape, {
         depth: baseBottomDepth - threadDepth + OVERLAP,
         bevelEnabled: false,
@@ -86,7 +89,7 @@ export function buildStampGeometry(
       group.add(frontMesh);
     }
   } else {
-    const baseShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+    const baseShape = createRoundedRectShape(physW, physH, settings.cornerRadius);
     const baseGeo = new THREE.ExtrudeGeometry(baseShape, {
       depth: baseBottomDepth,
       bevelEnabled: false,
@@ -103,7 +106,7 @@ export function buildStampGeometry(
     const mat = new THREE.MeshStandardMaterial({ color: normalColor });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "design";
-    mesh.position.set(0, 0, settings.baseThickness - OVERLAP);
+    mesh.position.set(margin, margin, settings.baseThickness - OVERLAP);
     group.add(mesh);
 
     group.userData.hasThinFeatures = false;
@@ -114,7 +117,7 @@ export function buildStampGeometry(
     const threadGeo = createFemaleThreadGeometry(settings.threadConfig);
     const threadMat = new THREE.MeshStandardMaterial({ color: 0x6b4226 });
     const threadMesh = new THREE.Mesh(threadGeo, threadMat);
-    threadMesh.position.set(settings.width / 2, settings.height / 2, 0);
+    threadMesh.position.set(physW / 2, physH / 2, 0);
     threadMesh.rotation.x = Math.PI;
     threadMesh.position.z = settings.threadConfig.height;
     group.add(threadMesh);

@@ -139,10 +139,9 @@ export function computeTextLayout(
   fontCache: Map<string, Font>,
   stampWidth: number,
   stampHeight: number,
-  padding: number,
   hasImage: boolean,
 ): TextLayoutResult {
-  const availW = stampWidth - padding * 2;
+  const availW = stampWidth;
 
   const measured: { entry: StampText; measurement: EntryMeasurement; displayH: number; scale: number }[] = [];
   for (const entry of texts) {
@@ -168,7 +167,7 @@ export function computeTextLayout(
 
     return {
       placements,
-      imageZone: { yMin: padding, yMax: stampHeight - padding },
+      imageZone: { yMin: 0, yMax: stampHeight },
       totalTextHeight: totalH,
     };
   }
@@ -186,20 +185,20 @@ export function computeTextLayout(
   const topGap = topEntries.length > 0 ? ELEMENT_GAP : 0;
   const bottomGap = bottomEntries.length > 0 ? ELEMENT_GAP : 0;
 
-  const imageYMax = stampHeight - padding - topH - topGap;
-  const imageYMin = padding + bottomH + bottomGap;
+  const imageYMax = stampHeight - topH - topGap;
+  const imageYMin = bottomH + bottomGap;
 
   const placements: TextPlacement[] = [];
 
   // Top entries: stack downward from stamp top
-  let y = stampHeight - padding;
+  let y = stampHeight;
   for (const m of topEntries) {
     placements.push({ measurement: m.measurement, yTop: y, scale: m.scale });
     y -= m.displayH + ELEMENT_GAP;
   }
 
   // Bottom entries: stack upward from stamp bottom
-  y = padding;
+  y = 0;
   for (let i = bottomEntries.length - 1; i >= 0; i--) {
     const m = bottomEntries[i];
     placements.push({ measurement: m.measurement, yTop: y + m.displayH, scale: m.scale });
@@ -208,7 +207,7 @@ export function computeTextLayout(
 
   return {
     placements,
-    imageZone: { yMin: Math.max(padding, imageYMin), yMax: Math.min(stampHeight - padding, imageYMax) },
+    imageZone: { yMin: Math.max(0, imageYMin), yMax: Math.min(stampHeight, imageYMax) },
     totalTextHeight: topH + bottomH,
   };
 }
@@ -221,12 +220,9 @@ export function computeRequiredHeight(
   texts: StampText[],
   fontCache: Map<string, Font>,
   stampWidth: number,
-  padding: number,
   hasImage: boolean,
   imageAspectRatio: number | null,
 ): number | null {
-  const availW = stampWidth - padding * 2;
-
   const measured: { entry: StampText; displayH: number }[] = [];
   for (const entry of texts) {
     if (!entry.content.trim()) continue;
@@ -234,7 +230,7 @@ export function computeRequiredHeight(
     if (!font) continue;
     const m = measureEntry(entry, font);
     if (!m) continue;
-    const scale = m.maxLineWidth > 0 ? Math.min(1, availW / m.maxLineWidth) : 1;
+    const scale = m.maxLineWidth > 0 ? Math.min(1, stampWidth / m.maxLineWidth) : 1;
     measured.push({ entry, displayH: m.totalHeight * scale });
   }
 
@@ -242,7 +238,7 @@ export function computeRequiredHeight(
 
   if (!hasImage) {
     const gaps = measured.length > 1 ? ELEMENT_GAP * (measured.length - 1) : 0;
-    return measured.reduce((s, m) => s + m.displayH, 0) + gaps + padding * 2;
+    return measured.reduce((s, m) => s + m.displayH, 0) + gaps;
   }
 
   const topEntries = measured.filter((m) => m.entry.align === "top");
@@ -255,10 +251,10 @@ export function computeRequiredHeight(
   const bottomH = bottomEntries.reduce((s, m) => s + m.displayH, 0);
 
   const imageH = imageAspectRatio && imageAspectRatio > 0
-    ? availW / imageAspectRatio
+    ? stampWidth / imageAspectRatio
     : 0;
 
-  return topH + topGaps + imageH + bottomGaps + bottomH + padding * 2;
+  return topH + topGaps + imageH + bottomGaps + bottomH;
 }
 
 // ---------------------------------------------------------------------------

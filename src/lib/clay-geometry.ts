@@ -8,8 +8,11 @@ export function buildClayImpressionGeometry(
   shapes: THREE.Shape[],
 ): THREE.Group {
   const group = new THREE.Group();
+  const margin = settings.margin;
+  const physW = settings.width + margin * 2;
+  const physH = settings.height + margin * 2;
 
-  const clayShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
+  const clayShape = createRoundedRectShape(physW, physH, settings.cornerRadius);
   const clayGeo = new THREE.ExtrudeGeometry(clayShape, {
     depth: CLAY_DEPTH,
     bevelEnabled: false,
@@ -26,7 +29,7 @@ export function buildClayImpressionGeometry(
   });
   const impressionMat = new THREE.MeshStandardMaterial({ color: 0x9c8060, roughness: 0.95 });
   const impressionMesh = new THREE.Mesh(impressionGeo, impressionMat);
-  impressionMesh.position.set(0, 0, CLAY_DEPTH - settings.impressionDepth);
+  impressionMesh.position.set(margin, margin, CLAY_DEPTH - settings.impressionDepth);
   group.add(impressionMesh);
 
   return group;

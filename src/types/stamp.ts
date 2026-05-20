@@ -21,7 +21,7 @@ export interface StampSettings {
   impressionDepth: number; // mm — how deep/tall the design features are
   cornerRadius: number; // mm — rounded rectangle corners
   autoSize: boolean;
-  padding: number; // mm — spacing around content when auto-sizing
+  margin: number; // mm — extra base material around the design
   simplification: number; // 0–1, controls raster trace detail
   threshold: number; // 0–255, luminance cutoff for black/white conversion
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
@@ -36,7 +36,7 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   impressionDepth: 5,
   cornerRadius: 3,
   autoSize: true,
-  padding: 4,
+  margin: 4,
   simplification: 0.5,
   threshold: 128,
   nozzleDiameter: 0.4,
