@@ -143,7 +143,22 @@ function useImageTrace(
 
       dispatch({ type: "loading", stage: "Preparing…" });
 
-      createImageBitmap(img, { resizeWidth: tw, resizeHeight: th }).then((bitmap) => {
+      // SVGs must be drawn to a canvas at the target size so the browser's
+      // SVG renderer rasterizes at full resolution. createImageBitmap with
+      // resize options rasterizes at the intrinsic size first, producing a
+      // blurry or empty bitmap for SVGs.
+      const bitmapPromise = svgText
+        ? (() => {
+            const c = document.createElement("canvas");
+            c.width = tw;
+            c.height = th;
+            const ctx = c.getContext("2d")!;
+            ctx.drawImage(img, 0, 0, tw, th);
+            return createImageBitmap(c);
+          })()
+        : createImageBitmap(img, { resizeWidth: tw, resizeHeight: th });
+
+      bitmapPromise.then((bitmap) => {
         if (cancelled) { bitmap.close(); return; }
 
         if (workerRef.current) {
