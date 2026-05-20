@@ -85,13 +85,13 @@ function StampPreview({ settings, shapes, exportName }: Props) {
   }, [shapes, settings.width, settings.height, settings.baseThickness, settings.impressionDepth,
       settings.cornerRadius, settings.designMode, settings.threadEnabled, settings.threadConfig]);
 
+  const canCheckThinFeatures = !!stampGroup && shapes.length > 0 && settings.nozzleDiameter > 0;
+
   useEffect(() => {
+    if (!canCheckThinFeatures) return;
     if (!stampGroup) return;
     const designMesh = stampGroup.getObjectByName("design") as THREE.Mesh | undefined;
-    if (!designMesh || shapes.length === 0 || settings.nozzleDiameter <= 0) {
-      setHasThinFeatures(false);
-      return;
-    }
+    if (!designMesh) return;
 
     const mirroredData = shapes.map((s) => {
       const pts = s.getPoints();
@@ -167,7 +167,7 @@ function StampPreview({ settings, shapes, exportName }: Props) {
       worker.terminate();
       if (thinWorkerRef.current === worker) thinWorkerRef.current = null;
     };
-  }, [stampGroup, shapes, settings.width, settings.height, settings.nozzleDiameter]);
+  }, [canCheckThinFeatures, stampGroup, shapes, settings.width, settings.height, settings.nozzleDiameter]);
 
   const handleGroup = useMemo(() => {
     if (!settings.threadEnabled) return null;
@@ -227,7 +227,7 @@ function StampPreview({ settings, shapes, exportName }: Props) {
         </div>
       </div>
 
-      {hasThinFeatures && (
+      {canCheckThinFeatures && hasThinFeatures && (
         <p className="mt-2 text-sm text-red-600">
           Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red)
         </p>

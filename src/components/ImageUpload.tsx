@@ -18,7 +18,6 @@ export default function ImageUpload({
   isProcessing, progress = 0, progressStage = "",
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const isSvg = svgText !== null;
 
   const handleFile = useCallback(
     (file: File) => {

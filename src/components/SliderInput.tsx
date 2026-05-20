@@ -17,18 +17,20 @@ export default function SliderInput({
 }: Props) {
   const [localValue, setLocalValue] = useState(value);
   const dragging = useRef(false);
+  const localValueRef = useRef(value);
 
   useEffect(() => {
     if (!dragging.current) setLocalValue(value);
   }, [value]);
 
+  useEffect(() => {
+    localValueRef.current = localValue;
+  }, [localValue]);
+
   const commit = useCallback(() => {
     dragging.current = false;
-    onChange(localRef.current);
+    onChange(localValueRef.current);
   }, [onChange]);
-
-  const localRef = useRef(value);
-  localRef.current = localValue;
 
   const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
   const display = localValue.toFixed(decimals);
