@@ -1,70 +1,6 @@
 import * as THREE from "three";
 import type { StampPoint, StampShapeData, DesignData } from "@/types/stamp";
 
-function signedArea(contour: StampPoint[]): number {
-  let area = 0;
-  for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
-    area += (contour[j].x - contour[i].x) * (contour[j].y + contour[i].y);
-  }
-  return area / 2;
-}
-
-function pointInContour(px: number, py: number, contour: StampPoint[]): boolean {
-  let inside = false;
-  for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
-    const yi = contour[i].y, yj = contour[j].y;
-    if ((yi > py) !== (yj > py) &&
-        px < (contour[j].x - contour[i].x) * (py - yi) / (yj - yi) + contour[i].x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function nestContours(contours: StampPoint[][]): StampShapeData[] {
-  if (contours.length === 0) return [];
-
-  const indexed = contours.map((c, i) => ({
-    contour: c,
-    absArea: Math.abs(signedArea(c)),
-    index: i,
-  }));
-  indexed.sort((a, b) => b.absArea - a.absArea);
-
-  const depth = new Array<number>(indexed.length).fill(0);
-  const parent = new Array<number>(indexed.length).fill(-1);
-
-  for (let i = 1; i < indexed.length; i++) {
-    const p = indexed[i].contour[0];
-    for (let j = i - 1; j >= 0; j--) {
-      if (pointInContour(p.x, p.y, indexed[j].contour)) {
-        parent[i] = j;
-        depth[i] = depth[j] + 1;
-        break;
-      }
-    }
-  }
-
-  const shapes: StampShapeData[] = [];
-  const shapeByIndex = new Map<number, StampShapeData>();
-
-  for (let i = 0; i < indexed.length; i++) {
-    const pts = indexed[i].contour;
-    if (depth[i] % 2 === 0) {
-      const shape: StampShapeData = { outer: pts, holes: [] };
-      shapes.push(shape);
-      shapeByIndex.set(i, shape);
-    } else {
-      const parentShape = shapeByIndex.get(parent[i]);
-      if (parentShape) {
-        parentShape.holes.push(pts);
-      }
-    }
-  }
-
-  return shapes;
-}
-
 export function computeBounds(shapes: StampShapeData[]): DesignData["bounds"] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of shapes) {
@@ -80,7 +16,7 @@ export function computeBounds(shapes: StampShapeData[]): DesignData["bounds"] {
 }
 
 export function rasterToDesignData(
-  rawContours: StampPoint[][],
+  rawShapes: StampShapeData[],
   rawImageDims: { w: number; h: number },
   stampW: number,
   stampH: number,
@@ -93,11 +29,13 @@ export function rasterToDesignData(
   const offsetX = (stampW - rawImageDims.w * scale) / 2;
   const offsetY = regionY + (regionH - rawImageDims.h * scale) / 2;
 
-  const scaled = rawContours.map((c) =>
-    c.map((p) => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY })),
-  );
+  const scalePoint = (p: StampPoint) => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY });
 
-  const shapes = nestContours(scaled);
+  const shapes: StampShapeData[] = rawShapes.map((s) => ({
+    outer: s.outer.map(scalePoint),
+    holes: s.holes.map((h) => h.map(scalePoint)),
+  }));
+
   return {
     shapes,
     bounds: computeBounds(shapes),

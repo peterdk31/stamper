@@ -2,13 +2,13 @@
 
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { useRef, useMemo, useEffect, useState } from "react";
+import { useRef, useMemo, useEffect, useState, memo } from "react";
 import * as THREE from "three";
-import { buildStampGeometry } from "@/lib/stamp-geometry";
 import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
 import type { StampSettings } from "@/types/stamp";
 import type { ThinFeatureMessage } from "@/lib/thin-feature-detect.worker";
+import type { StampGeoMessage } from "@/lib/stamp-geometry.worker";
 
 interface Props {
   settings: StampSettings;
@@ -16,17 +16,77 @@ interface Props {
   exportName: string;
 }
 
-export default function StampPreview({ settings, shapes, exportName }: Props) {
+function StampPreview({ settings, shapes, exportName }: Props) {
   const stampRef = useRef<THREE.Group>(null);
   const thinWorkerRef = useRef<Worker | null>(null);
+  const geoWorkerRef = useRef<Worker | null>(null);
+  const [stampGroup, setStampGroup] = useState<THREE.Group | null>(null);
   const [hasThinFeatures, setHasThinFeatures] = useState(false);
 
-  const stampGroup = useMemo(
-    () => buildStampGeometry(settings, shapes),
-    [settings, shapes],
-  );
+  useEffect(() => {
+    const shapeData = shapes.map(s => ({
+      outer: s.getPoints().map(p => ({ x: p.x, y: p.y })),
+      holes: s.holes.map(h => h.getPoints().map(p => ({ x: p.x, y: p.y }))),
+    }));
+
+    if (geoWorkerRef.current) geoWorkerRef.current.terminate();
+
+    const worker = new Worker(new URL("../lib/stamp-geometry.worker.ts", import.meta.url));
+    geoWorkerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent<StampGeoMessage>) => {
+      if (geoWorkerRef.current !== worker) return;
+      const { meshes, normalColor } = e.data;
+
+      const group = new THREE.Group();
+      for (const m of meshes) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(m.position, 3));
+        if (m.normal.length > 0) {
+          geo.setAttribute("normal", new THREE.Float32BufferAttribute(m.normal, 3));
+        }
+        if (m.index) geo.setIndex(new THREE.BufferAttribute(m.index, 1));
+        const mat = new THREE.MeshStandardMaterial({ color: m.color });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.name = m.name;
+        mesh.position.set(m.px, m.py, m.pz);
+        mesh.rotation.set(m.rx, m.ry, m.rz);
+        group.add(mesh);
+      }
+      group.userData.normalColor = normalColor;
+      group.userData.hasThinFeatures = false;
+      setStampGroup(group);
+
+      worker.terminate();
+      geoWorkerRef.current = null;
+    };
+
+    worker.onerror = () => {
+      worker.terminate();
+      if (geoWorkerRef.current === worker) geoWorkerRef.current = null;
+    };
+
+    worker.postMessage({
+      shapes: shapeData,
+      width: settings.width,
+      height: settings.height,
+      baseThickness: settings.baseThickness,
+      impressionDepth: settings.impressionDepth,
+      cornerRadius: settings.cornerRadius,
+      designMode: settings.designMode,
+      threadEnabled: settings.threadEnabled,
+      threadConfig: settings.threadConfig,
+    });
+
+    return () => {
+      worker.terminate();
+      if (geoWorkerRef.current === worker) geoWorkerRef.current = null;
+    };
+  }, [shapes, settings.width, settings.height, settings.baseThickness, settings.impressionDepth,
+      settings.cornerRadius, settings.designMode, settings.threadEnabled, settings.threadConfig]);
 
   useEffect(() => {
+    if (!stampGroup) return;
     const designMesh = stampGroup.getObjectByName("design") as THREE.Mesh | undefined;
     if (!designMesh || shapes.length === 0 || settings.nozzleDiameter <= 0) {
       setHasThinFeatures(false);
@@ -125,7 +185,7 @@ export default function StampPreview({ settings, shapes, exportName }: Props) {
       settings.height / 2,
       (settings.baseThickness + settings.impressionDepth) / 2,
     );
-  }, [settings]);
+  }, [settings.width, settings.height, settings.baseThickness, settings.impressionDepth]);
 
   function handleExportStamp() {
     if (!stampRef.current) return;
@@ -143,7 +203,7 @@ export default function StampPreview({ settings, shapes, exportName }: Props) {
         <Canvas camera={{ position: [60, 60, 60], fov: 45 }}>
           <ambientLight intensity={0.5} />
           <directionalLight position={[50, 50, 50]} intensity={1} />
-          <primitive ref={stampRef} object={stampGroup} />
+          {stampGroup && <primitive ref={stampRef} object={stampGroup} />}
           {handleGroup && <primitive object={handleGroup} />}
           <OrbitControls target={center} />
           <gridHelper args={[200, 20, 0x444444, 0x222222]} rotation={[Math.PI / 2, 0, 0]} />
@@ -175,3 +235,5 @@ export default function StampPreview({ settings, shapes, exportName }: Props) {
     </div>
   );
 }
+
+export default memo(StampPreview);

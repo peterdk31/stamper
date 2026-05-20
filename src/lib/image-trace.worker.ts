@@ -40,16 +40,82 @@ function simplifyContour(points: Point[], tolerance: number): Point[] {
   return [points[0], points[last]];
 }
 
+interface ShapeData {
+  outer: Point[];
+  holes: Point[][];
+}
+
+function signedArea(contour: Point[]): number {
+  let area = 0;
+  for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
+    area += (contour[j].x - contour[i].x) * (contour[j].y + contour[i].y);
+  }
+  return area / 2;
+}
+
+function pointInContour(px: number, py: number, contour: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
+    const yi = contour[i].y, yj = contour[j].y;
+    if ((yi > py) !== (yj > py) &&
+        px < (contour[j].x - contour[i].x) * (py - yi) / (yj - yi) + contour[i].x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function nestContours(contours: Point[][]): ShapeData[] {
+  if (contours.length === 0) return [];
+
+  const indexed = contours.map((c) => ({
+    contour: c,
+    absArea: Math.abs(signedArea(c)),
+  }));
+  indexed.sort((a, b) => b.absArea - a.absArea);
+
+  const depth = new Array<number>(indexed.length).fill(0);
+  const parent = new Array<number>(indexed.length).fill(-1);
+
+  for (let i = 1; i < indexed.length; i++) {
+    const p = indexed[i].contour[0];
+    for (let j = i - 1; j >= 0; j--) {
+      if (pointInContour(p.x, p.y, indexed[j].contour)) {
+        parent[i] = j;
+        depth[i] = depth[j] + 1;
+        break;
+      }
+    }
+  }
+
+  const shapes: ShapeData[] = [];
+  const shapeByIndex = new Map<number, ShapeData>();
+
+  for (let i = 0; i < indexed.length; i++) {
+    const pts = indexed[i].contour;
+    if (depth[i] % 2 === 0) {
+      const shape: ShapeData = { outer: pts, holes: [] };
+      shapes.push(shape);
+      shapeByIndex.set(i, shape);
+    } else {
+      const parentShape = shapeByIndex.get(parent[i]);
+      if (parentShape) {
+        parentShape.holes.push(pts);
+      }
+    }
+  }
+
+  return shapes;
+}
+
 export interface TraceRequest {
-  width: number;
-  height: number;
-  data: Uint8ClampedArray;
+  bitmap: ImageBitmap;
   threshold: number;
 }
 
 export type TraceMessage =
   | { type: "progress"; progress: number; stage: string }
-  | { type: "result"; contours: Point[][]; imageWidth: number; imageHeight: number };
+  | { type: "result"; shapes: ShapeData[]; imageWidth: number; imageHeight: number };
 
 type ProgressFn = (progress: number, stage: string) => void;
 
@@ -186,7 +252,17 @@ function marchingSquares(
 }
 
 self.onmessage = (e: MessageEvent<TraceRequest>) => {
-  const { width, height, data, threshold } = e.data;
+  const { bitmap, threshold } = e.data;
+
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  bitmap.close();
+
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
 
   const post = self.postMessage.bind(self);
   let lastReported = -1;
@@ -216,8 +292,6 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
 
   report(0.70, "Simplifying…");
 
-  // Fixed tolerance of 1.0 pixel: collapses marching-squares staircases
-  // (which deviate ~0.7px from ideal lines) while preserving curves.
   if (contours.length > 0) {
     const total = contours.length;
     const simplified: Point[][] = [];
@@ -229,11 +303,13 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     contours = simplified;
   }
 
-  report(0.90, "Done");
+  report(0.90, "Nesting contours…");
 
-  const rawContours = contours.map((contour) =>
+  const flipped = contours.map((contour) =>
     contour.map((p) => ({ x: p.x, y: height - p.y })),
   );
 
-  post({ type: "result", contours: rawContours, imageWidth: width, imageHeight: height } as TraceMessage);
+  const shapes = nestContours(flipped);
+
+  post({ type: "result", shapes, imageWidth: width, imageHeight: height } as TraceMessage);
 };

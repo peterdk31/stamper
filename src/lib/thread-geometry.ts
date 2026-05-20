@@ -89,12 +89,13 @@ export function createMaleThreadGeometry(config: ThreadConfig): THREE.BufferGeom
   const { majorDiameter, pitch, height, tolerance, segments } = config;
   const { threadDepth, minorR } = isoMetricDimensions(majorDiameter, pitch);
   const effectiveMinorR = minorR - tolerance;
-  const coreR = effectiveMinorR;
   const revolutions = height / pitch;
   const totalZSteps = Math.ceil(revolutions * STEPS_PER_PITCH);
 
   const vertices: number[] = [];
   const indices: number[] = [];
+
+  const ringSize = segments + 1;
 
   for (let i = 0; i <= totalZSteps; i++) {
     const z = (i / totalZSteps) * height;
@@ -105,45 +106,30 @@ export function createMaleThreadGeometry(config: ThreadConfig): THREE.BufferGeom
       const taper = Math.min(z / pitch, 1);
       const r = effectiveMinorR + profile * threadDepth * taper;
       vertices.push(Math.cos(circumAngle) * r, Math.sin(circumAngle) * r, z);
-      vertices.push(Math.cos(circumAngle) * coreR, Math.sin(circumAngle) * coreR, z);
     }
   }
 
-  const ringSize = (segments + 1) * 2;
   for (let i = 0; i < totalZSteps; i++) {
     for (let j = 0; j < segments; j++) {
-      const curr = i * ringSize + j * 2;
+      const curr = i * ringSize + j;
       const next = curr + ringSize;
 
-      indices.push(curr, curr + 2, next + 2);
-      indices.push(curr, next + 2, next);
-
-      indices.push(curr + 1, next + 3, curr + 3);
-      indices.push(curr + 1, next + 1, next + 3);
+      indices.push(curr, curr + 1, next + 1);
+      indices.push(curr, next + 1, next);
     }
   }
 
   const bottomCenter = vertices.length / 3;
   vertices.push(0, 0, 0);
-  for (let j = 0; j <= segments; j++) {
-    const circumAngle = (j / segments) * Math.PI * 2;
-    vertices.push(Math.cos(circumAngle) * effectiveMinorR, Math.sin(circumAngle) * effectiveMinorR, 0);
-  }
   for (let j = 0; j < segments; j++) {
-    indices.push(bottomCenter, bottomCenter + 1 + j, bottomCenter + 1 + ((j + 1) % (segments + 1)));
+    indices.push(bottomCenter, j + 1, j);
   }
 
+  const topRingStart = totalZSteps * ringSize;
   const topCenter = vertices.length / 3;
   vertices.push(0, 0, height);
-  for (let j = 0; j <= segments; j++) {
-    const circumAngle = (j / segments) * Math.PI * 2;
-    const helixPhase = height / pitch + circumAngle / (Math.PI * 2);
-    const profile = threadProfile(helixPhase);
-    const r = effectiveMinorR + profile * threadDepth;
-    vertices.push(Math.cos(circumAngle) * r, Math.sin(circumAngle) * r, height);
-  }
   for (let j = 0; j < segments; j++) {
-    indices.push(topCenter, topCenter + 1 + ((j + 1) % (segments + 1)), topCenter + 1 + j);
+    indices.push(topCenter, topRingStart + j, topRingStart + j + 1);
   }
 
   const geo = new THREE.BufferGeometry();

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useReducer } from "react";
 import * as THREE from "three";
 import type { StampSettings, StampText, DesignData } from "@/types/stamp";
+import type { StampShapeData } from "@/types/stamp";
 import type { TraceMessage } from "@/lib/image-trace.worker";
 import type { AutoFitResult } from "@/lib/auto-fit.worker";
 import { rasterToDesignData, designDataToShapes } from "@/lib/design-data";
@@ -54,7 +55,7 @@ export interface PipelineOutputs {
 // ---------------------------------------------------------------------------
 
 interface TraceState {
-  rawContours: { x: number; y: number }[][] | null;
+  rawShapes: StampShapeData[] | null;
   rawImageDims: { w: number; h: number } | null;
   isTracing: boolean;
   traceProgress: number;
@@ -64,7 +65,7 @@ interface TraceState {
 type TraceAction =
   | { type: "loading"; stage: string }
   | { type: "progress"; progress: number; stage: string }
-  | { type: "result"; contours: { x: number; y: number }[][]; imageWidth: number; imageHeight: number }
+  | { type: "result"; shapes: StampShapeData[]; imageWidth: number; imageHeight: number }
   | { type: "error" }
   | { type: "clear" };
 
@@ -76,23 +77,23 @@ function traceReducer(state: TraceState, action: TraceAction): TraceState {
       return { ...state, traceProgress: action.progress, traceStage: action.stage };
     case "result":
       return {
-        rawContours: action.contours,
+        rawShapes: action.shapes,
         rawImageDims: { w: action.imageWidth, h: action.imageHeight },
         isTracing: false, traceProgress: 1, traceStage: "",
       };
     case "error":
       return { ...state, isTracing: false };
     case "clear":
-      return { rawContours: null, rawImageDims: null, isTracing: false, traceProgress: 0, traceStage: "" };
+      return { rawShapes: null, rawImageDims: null, isTracing: false, traceProgress: 0, traceStage: "" };
   }
 }
 
 const INITIAL_TRACE_STATE: TraceState = {
-  rawContours: null, rawImageDims: null, isTracing: false, traceProgress: 0, traceStage: "",
+  rawShapes: null, rawImageDims: null, isTracing: false, traceProgress: 0, traceStage: "",
 };
 
 interface TraceOutput {
-  rawContours: { x: number; y: number }[][] | null;
+  rawShapes: StampShapeData[] | null;
   rawImageDims: { w: number; h: number } | null;
   sourceAspectRatio: number | null;
   isTracing: boolean;
@@ -138,48 +139,44 @@ function useImageTrace(
       const tw = Math.round(img.width * scale);
       const th = Math.round(img.height * scale);
 
-      const canvas = document.createElement("canvas");
-      canvas.width = tw;
-      canvas.height = th;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0, tw, th);
-      const pixels = ctx.getImageData(0, 0, tw, th);
+      dispatch({ type: "loading", stage: "Preparing…" });
 
-      if (workerRef.current) {
-        workerRef.current.terminate();
-      }
+      createImageBitmap(img, { resizeWidth: tw, resizeHeight: th }).then((bitmap) => {
+        if (cancelled) { bitmap.close(); return; }
 
-      dispatch({ type: "loading", stage: "Starting…" });
+        if (workerRef.current) {
+          workerRef.current.terminate();
+        }
 
-      const worker = new Worker(
-        new URL("../lib/image-trace.worker.ts", import.meta.url),
-      );
-      workerRef.current = worker;
+        dispatch({ type: "loading", stage: "Starting…" });
 
-      worker.onmessage = (e: MessageEvent<TraceMessage>) => {
-        if (cancelled || workerRef.current !== worker) return;
-        const msg = e.data;
-        if (msg.type === "progress") {
-          dispatch({ type: "progress", progress: msg.progress, stage: msg.stage });
-        } else if (msg.type === "result") {
-          dispatch({ type: "result", contours: msg.contours, imageWidth: msg.imageWidth, imageHeight: msg.imageHeight });
+        const worker = new Worker(
+          new URL("../lib/image-trace.worker.ts", import.meta.url),
+        );
+        workerRef.current = worker;
+
+        worker.onmessage = (e: MessageEvent<TraceMessage>) => {
+          if (cancelled || workerRef.current !== worker) return;
+          const msg = e.data;
+          if (msg.type === "progress") {
+            dispatch({ type: "progress", progress: msg.progress, stage: msg.stage });
+          } else if (msg.type === "result") {
+            dispatch({ type: "result", shapes: msg.shapes, imageWidth: msg.imageWidth, imageHeight: msg.imageHeight });
+            worker.terminate();
+            if (workerRef.current === worker) workerRef.current = null;
+          }
+        };
+
+        worker.onerror = () => {
+          if (cancelled || workerRef.current !== worker) return;
+          dispatch({ type: "error" });
           worker.terminate();
           if (workerRef.current === worker) workerRef.current = null;
-        }
-      };
+        };
 
-      worker.onerror = () => {
-        if (cancelled || workerRef.current !== worker) return;
-        dispatch({ type: "error" });
-        worker.terminate();
-        if (workerRef.current === worker) workerRef.current = null;
-      };
-
-      worker.postMessage({
-        width: pixels.width,
-        height: pixels.height,
-        data: pixels.data,
-        threshold: 128,
+        worker.postMessage({ bitmap, threshold: 128 }, [bitmap]);
+      }).catch(() => {
+        if (!cancelled) dispatch({ type: "error" });
       });
     };
 
@@ -200,7 +197,7 @@ function useImageTrace(
   }, [state.rawImageDims]);
 
   return {
-    rawContours: state.rawContours,
+    rawShapes: state.rawShapes,
     rawImageDims: state.rawImageDims,
     sourceAspectRatio,
     isTracing: state.isTracing,
@@ -334,7 +331,7 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
   const trace = useImageTrace(imageDataUrl, svgText);
 
-  const hasImage = !!(trace.rawContours && trace.rawImageDims);
+  const hasImage = !!(trace.rawShapes && trace.rawImageDims);
 
   // 2. Effective settings (auto-size based on stacked layout)
   const effectiveSettings = useEffectiveSettings(settings, trace.sourceAspectRatio, texts, fontsReady, hasImage);
@@ -356,16 +353,16 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
 
   // 4. Image → DesignData (rendered within computed image zone)
   const imageData = useMemo<DesignData | null>(() => {
-    if (trace.rawContours && trace.rawImageDims) {
+    if (trace.rawShapes && trace.rawImageDims) {
       const hasText = textLayout.textData !== null;
       return rasterToDesignData(
-        trace.rawContours, trace.rawImageDims,
+        trace.rawShapes, trace.rawImageDims,
         effectiveSettings.width, effectiveSettings.height,
         hasText ? textLayout.imageZone : undefined,
       );
     }
     return null;
-  }, [trace.rawContours, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData]);
+  }, [trace.rawShapes, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData]);
 
   // 5. Smooth image data (before merge — smoothing should not apply to text)
   const stepFlags: StepFlags = { thickenEnabled, smoothEnabled };
