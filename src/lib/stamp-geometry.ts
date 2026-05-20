@@ -46,20 +46,22 @@ function mirrorShapes(shapes: THREE.Shape[], width: number): THREE.Shape[] {
   });
 }
 
+const OVERLAP = 0.01;
+
 export function buildStampGeometry(
   settings: StampSettings,
   shapes: THREE.Shape[],
 ): THREE.Group {
   const group = new THREE.Group();
-  const totalHeight = settings.baseThickness + settings.impressionDepth;
-  const isRaised = settings.designMode === "raised";
 
-  const baseDepth = isRaised ? settings.baseThickness : totalHeight;
   const baseMat = new THREE.MeshStandardMaterial({ color: 0xd4a373 });
+  const mirrored = shapes.length > 0 ? mirrorShapes(shapes, settings.width) : [];
+
+  const baseBottomDepth = settings.baseThickness;
 
   if (settings.threadEnabled) {
     const majorR = settings.threadConfig.majorDiameter / 2;
-    const threadDepth = Math.min(settings.threadConfig.height, baseDepth);
+    const threadDepth = Math.min(settings.threadConfig.height, baseBottomDepth);
 
     const holedShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
     const holePath = new THREE.Path();
@@ -73,40 +75,35 @@ export function buildStampGeometry(
     });
     group.add(new THREE.Mesh(backGeo, baseMat));
 
-    if (threadDepth < baseDepth) {
+    if (threadDepth < baseBottomDepth) {
       const frontShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
       const frontGeo = new THREE.ExtrudeGeometry(frontShape, {
-        depth: baseDepth - threadDepth,
+        depth: baseBottomDepth - threadDepth + OVERLAP,
         bevelEnabled: false,
       });
       const frontMesh = new THREE.Mesh(frontGeo, baseMat);
-      frontMesh.position.z = threadDepth;
+      frontMesh.position.z = threadDepth - OVERLAP;
       group.add(frontMesh);
     }
   } else {
     const baseShape = createRoundedRectShape(settings.width, settings.height, settings.cornerRadius);
     const baseGeo = new THREE.ExtrudeGeometry(baseShape, {
-      depth: baseDepth,
+      depth: baseBottomDepth,
       bevelEnabled: false,
     });
     group.add(new THREE.Mesh(baseGeo, baseMat));
   }
 
-  const allShapes = shapes;
-  if (allShapes.length > 0) {
-    const mirrored = mirrorShapes(allShapes, settings.width);
-
-    const normalColor = isRaised ? 0x8b5e3c : 0x6b4226;
+  if (mirrored.length > 0) {
+    const normalColor = 0x8b5e3c;
     const geo = new THREE.ExtrudeGeometry(mirrored, {
-      depth: settings.impressionDepth,
+      depth: settings.impressionDepth + OVERLAP,
       bevelEnabled: false,
     });
-
     const mat = new THREE.MeshStandardMaterial({ color: normalColor });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = "design";
-    const z = isRaised ? settings.baseThickness : totalHeight - settings.impressionDepth;
-    mesh.position.set(0, 0, z);
+    mesh.position.set(0, 0, settings.baseThickness - OVERLAP);
     group.add(mesh);
 
     group.userData.hasThinFeatures = false;
@@ -117,8 +114,6 @@ export function buildStampGeometry(
     const threadGeo = createFemaleThreadGeometry(settings.threadConfig);
     const threadMat = new THREE.MeshStandardMaterial({ color: 0x6b4226 });
     const threadMesh = new THREE.Mesh(threadGeo, threadMat);
-    // Position thread hole centered on the back face (z=0), extending downward
-    // We flip it so it goes into the stamp from the back
     threadMesh.position.set(settings.width / 2, settings.height / 2, 0);
     threadMesh.rotation.x = Math.PI;
     threadMesh.position.z = settings.threadConfig.height;

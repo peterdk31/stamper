@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  type DesignMode,
   type StampSettings,
   type ThreadConfig,
 } from "@/types/stamp";
@@ -78,24 +77,6 @@ export default function StampSettingsPanel({ settings, onChange, onFindMinWidth,
 
       <fieldset className="space-y-3 border-t pt-4">
         <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Design</legend>
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Design Mode</label>
-          <div className="mt-1 flex gap-2">
-            {(["raised", "recessed"] as DesignMode[]).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => update({ designMode: mode })}
-                className={`px-3 py-1.5 rounded text-sm font-medium capitalize ${
-                  settings.designMode === mode
-                    ? "bg-amber-700 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-        </div>
         <SliderInput label="Impression Depth" unit="mm" value={settings.impressionDepth} min={0.2} max={10} step={0.1}
           onChange={(v) => update({ impressionDepth: v })} />
         <div className="flex items-center justify-between">

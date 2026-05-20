@@ -12,7 +12,6 @@ interface GeometryRequest {
   baseThickness: number;
   impressionDepth: number;
   cornerRadius: number;
-  designMode: "raised" | "recessed";
   threadEnabled: boolean;
   threadConfig: {
     majorDiameter: number;
@@ -184,18 +183,23 @@ function createFemaleThreadGeometry(config: GeometryRequest["threadConfig"]): Bu
   return geo;
 }
 
-self.onmessage = (e: MessageEvent<GeometryRequest>) => {
-  const { shapes: shapeData, width, height, baseThickness, impressionDepth, cornerRadius, designMode, threadEnabled, threadConfig } = e.data;
+const OVERLAP = 0.01;
 
-  const totalHeight = baseThickness + impressionDepth;
-  const isRaised = designMode === "raised";
-  const baseDepth = isRaised ? baseThickness : totalHeight;
+self.onmessage = (e: MessageEvent<GeometryRequest>) => {
+  const { shapes: shapeData, width, height, baseThickness, impressionDepth, cornerRadius, threadEnabled, threadConfig } = e.data;
+
   const baseColor = 0xd4a373;
   const meshes: SerializedMesh[] = [];
 
+  const shapes = toShapes(shapeData);
+  const mirrored = shapes.length > 0 ? mirrorShapes(shapes, width) : [];
+  let normalColor = 0;
+
+  const baseBottomDepth = baseThickness;
+
   if (threadEnabled) {
     const majorR = threadConfig.majorDiameter / 2;
-    const threadDepth = Math.min(threadConfig.height, baseDepth);
+    const threadDepth = Math.min(threadConfig.height, baseBottomDepth);
 
     const holedShape = createRoundedRectShape(width, height, cornerRadius);
     const holePath = new Path();
@@ -207,25 +211,27 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
     });
     meshes.push(serializeGeo(backGeo, "base-back", baseColor));
 
-    if (threadDepth < baseDepth) {
+    if (threadDepth < baseBottomDepth) {
       const frontShape = createRoundedRectShape(width, height, cornerRadius);
-      const frontGeo = new ExtrudeGeometry(frontShape, { depth: baseDepth - threadDepth, bevelEnabled: false });
-      meshes.push(serializeGeo(frontGeo, "base-front", baseColor, 0, 0, threadDepth));
+      const frontGeo = new ExtrudeGeometry(frontShape, {
+        depth: baseBottomDepth - threadDepth + OVERLAP,
+        bevelEnabled: false,
+      });
+      meshes.push(serializeGeo(frontGeo, "base-front", baseColor, 0, 0, threadDepth - OVERLAP));
     }
   } else {
     const baseShape = createRoundedRectShape(width, height, cornerRadius);
-    const baseGeo = new ExtrudeGeometry(baseShape, { depth: baseDepth, bevelEnabled: false });
+    const baseGeo = new ExtrudeGeometry(baseShape, { depth: baseBottomDepth, bevelEnabled: false });
     meshes.push(serializeGeo(baseGeo, "base", baseColor));
   }
 
-  const shapes = toShapes(shapeData);
-  let normalColor = 0;
-  if (shapes.length > 0) {
-    const mirrored = mirrorShapes(shapes, width);
-    normalColor = isRaised ? 0x8b5e3c : 0x6b4226;
-    const geo = new ExtrudeGeometry(mirrored, { depth: impressionDepth, bevelEnabled: false });
-    const z = isRaised ? baseThickness : totalHeight - impressionDepth;
-    meshes.push(serializeGeo(geo, "design", normalColor, 0, 0, z));
+  if (mirrored.length > 0) {
+    normalColor = 0x8b5e3c;
+    const geo = new ExtrudeGeometry(mirrored, {
+      depth: impressionDepth + OVERLAP,
+      bevelEnabled: false,
+    });
+    meshes.push(serializeGeo(geo, "design", normalColor, 0, 0, baseThickness - OVERLAP));
   }
 
   if (threadEnabled) {

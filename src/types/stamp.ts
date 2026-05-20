@@ -22,15 +22,12 @@ export interface StampSettings {
   cornerRadius: number; // mm — rounded rectangle corners
   autoSize: boolean;
   padding: number; // mm — spacing around content when auto-sizing
-  designMode: DesignMode;
   simplification: number; // 0–1, controls raster trace detail
   threshold: number; // 0–255, luminance cutoff for black/white conversion
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
 }
-
-export type DesignMode = "raised" | "recessed";
 
 export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   width: 40,
@@ -40,7 +37,6 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   cornerRadius: 3,
   autoSize: true,
   padding: 4,
-  designMode: "raised",
   simplification: 0.5,
   threshold: 128,
   nozzleDiameter: 0.4,
