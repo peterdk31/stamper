@@ -6,22 +6,20 @@ import { useRef, useMemo, useEffect, useState, memo } from "react";
 import * as THREE from "three";
 import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
-import type { StampSettings } from "@/types/stamp";
-import type { ThinFeatureMessage } from "@/lib/thin-feature-detect.worker";
+import type { StampSettings, ThinFeatureMap } from "@/types/stamp";
 import type { StampGeoMessage } from "@/lib/stamp-geometry.worker";
 
 interface Props {
   settings: StampSettings;
   shapes: THREE.Shape[];
   exportName: string;
+  thinFeatureMap: ThinFeatureMap | null;
 }
 
-function StampPreview({ settings, shapes, exportName }: Props) {
+function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
   const stampRef = useRef<THREE.Group>(null);
-  const thinWorkerRef = useRef<Worker | null>(null);
   const geoWorkerRef = useRef<Worker | null>(null);
   const [stampGroup, setStampGroup] = useState<THREE.Group | null>(null);
-  const [hasThinFeatures, setHasThinFeatures] = useState(false);
 
   useEffect(() => {
     const shapeData = shapes.map(s => ({
@@ -54,7 +52,6 @@ function StampPreview({ settings, shapes, exportName }: Props) {
         group.add(mesh);
       }
       group.userData.normalColor = normalColor;
-      group.userData.hasThinFeatures = false;
       setStampGroup(group);
 
       worker.terminate();
@@ -85,89 +82,52 @@ function StampPreview({ settings, shapes, exportName }: Props) {
   }, [shapes, settings.width, settings.height, settings.baseThickness, settings.impressionDepth,
       settings.cornerRadius, settings.designMode, settings.threadEnabled, settings.threadConfig]);
 
-  const canCheckThinFeatures = !!stampGroup && shapes.length > 0 && settings.nozzleDiameter > 0;
-
   useEffect(() => {
-    if (!canCheckThinFeatures) return;
     if (!stampGroup) return;
     const designMesh = stampGroup.getObjectByName("design") as THREE.Mesh | undefined;
     if (!designMesh) return;
 
-    const mirroredData = shapes.map((s) => {
-      const pts = s.getPoints();
-      return {
-        outer: pts.map((p) => ({ x: settings.width - p.x, y: p.y })),
-        holes: s.holes.map((h) => h.getPoints().map((p) => ({ x: settings.width - p.x, y: p.y }))),
-      };
-    });
+    if (!thinFeatureMap || !thinFeatureMap.hasThinFeatures) {
+      const normalColor = (stampGroup.userData.normalColor as number) ?? 0x8b5e3c;
+      (designMesh.material as THREE.MeshStandardMaterial).map = null;
+      (designMesh.material as THREE.MeshStandardMaterial).color.setHex(normalColor);
+      (designMesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
+      return;
+    }
 
-    if (thinWorkerRef.current) thinWorkerRef.current.terminate();
+    const normalColor = (stampGroup.userData.normalColor as number) ?? 0x8b5e3c;
+    const nr = (normalColor >> 16) & 0xff;
+    const ng = (normalColor >> 8) & 0xff;
+    const nb = normalColor & 0xff;
 
-    const worker = new Worker(new URL("../lib/thin-feature-detect.worker.ts", import.meta.url));
-    thinWorkerRef.current = worker;
-
-    worker.onmessage = (e: MessageEvent<ThinFeatureMessage>) => {
-      if (thinWorkerRef.current !== worker) return;
-      const msg = e.data;
-      if (msg.type === "empty") {
-        setHasThinFeatures(false);
-      } else {
-        setHasThinFeatures(msg.hasThinFeatures);
-        if (msg.hasThinFeatures) {
-          const normalColor = (stampGroup.userData.normalColor as number) ?? 0x8b5e3c;
-          const nr = (normalColor >> 16) & 0xff;
-          const ng = (normalColor >> 8) & 0xff;
-          const nb = normalColor & 0xff;
-          const pixels = msg.pixels;
-          for (let i = 0; i < msg.gridW * msg.gridH; i++) {
-            if (pixels[i * 4 + 3] === 0) {
-              pixels[i * 4] = nr;
-              pixels[i * 4 + 1] = ng;
-              pixels[i * 4 + 2] = nb;
-              pixels[i * 4 + 3] = 255;
-            }
-          }
-          const tex = new THREE.DataTexture(pixels, msg.gridW, msg.gridH);
-          tex.needsUpdate = true;
-          tex.magFilter = THREE.NearestFilter;
-          tex.minFilter = THREE.NearestFilter;
-
-          const geo = designMesh.geometry;
-          const positions = geo.attributes.position;
-          const uvs = new Float32Array(positions.count * 2);
-          for (let i = 0; i < positions.count; i++) {
-            uvs[i * 2] = positions.getX(i) / settings.width;
-            uvs[i * 2 + 1] = positions.getY(i) / settings.height;
-          }
-          geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-
-          (designMesh.material as THREE.MeshStandardMaterial).map = tex;
-          (designMesh.material as THREE.MeshStandardMaterial).color.setHex(0xffffff);
-          (designMesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
-        }
+    const pixels = new Uint8Array(thinFeatureMap.pixels);
+    for (let i = 0; i < thinFeatureMap.gridW * thinFeatureMap.gridH; i++) {
+      if (pixels[i * 4 + 3] === 0) {
+        pixels[i * 4] = nr;
+        pixels[i * 4 + 1] = ng;
+        pixels[i * 4 + 2] = nb;
+        pixels[i * 4 + 3] = 255;
       }
-      worker.terminate();
-      thinWorkerRef.current = null;
-    };
+    }
 
-    worker.onerror = () => {
-      setHasThinFeatures(false);
-      worker.terminate();
-      if (thinWorkerRef.current === worker) thinWorkerRef.current = null;
-    };
+    const tex = new THREE.DataTexture(pixels, thinFeatureMap.gridW, thinFeatureMap.gridH);
+    tex.needsUpdate = true;
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
 
-    worker.postMessage({
-      shapes: mirroredData,
-      stampWidth: settings.width,
-      stampHeight: settings.height,
-      nozzleDiameter: settings.nozzleDiameter,
-    });
+    const geo = designMesh.geometry;
+    const positions = geo.attributes.position;
+    const uvs = new Float32Array(positions.count * 2);
+    for (let i = 0; i < positions.count; i++) {
+      uvs[i * 2] = 1 - positions.getX(i) / settings.width;
+      uvs[i * 2 + 1] = positions.getY(i) / settings.height;
+    }
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
 
-    return () => {
-      worker.terminate();
-      if (thinWorkerRef.current === worker) thinWorkerRef.current = null;
-    };
-  }, [canCheckThinFeatures, stampGroup, shapes, settings.width, settings.height, settings.nozzleDiameter]);
+    (designMesh.material as THREE.MeshStandardMaterial).map = tex;
+    (designMesh.material as THREE.MeshStandardMaterial).color.setHex(0xffffff);
+    (designMesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
+  }, [stampGroup, thinFeatureMap, settings.width, settings.height]);
 
   const handleGroup = useMemo(() => {
     if (!settings.threadEnabled) return null;
@@ -227,7 +187,7 @@ function StampPreview({ settings, shapes, exportName }: Props) {
         </div>
       </div>
 
-      {canCheckThinFeatures && hasThinFeatures && (
+      {thinFeatureMap?.hasThinFeatures && (
         <p className="mt-2 text-sm text-red-600">
           Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red)
         </p>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useReducer } from "react";
 import * as THREE from "three";
-import type { StampSettings, StampText, DesignData } from "@/types/stamp";
+import type { StampSettings, StampText, DesignData, ThinFeatureMap } from "@/types/stamp";
 import type { StampShapeData } from "@/types/stamp";
 import type { TraceMessage } from "@/lib/image-trace.worker";
 import type { AutoFitResult } from "@/lib/auto-fit.worker";
@@ -35,6 +35,7 @@ export interface PipelineOutputs {
   shapes: THREE.Shape[];
   effectiveSettings: StampSettings;
   rawDesignShapes: THREE.Shape[];
+  thinFeatureMap: ThinFeatureMap | null;
 
   isTracing: boolean;
   traceProgress: number;
@@ -264,7 +265,6 @@ function useAutoFit(
   rawDesignShapes: THREE.Shape[],
   effectiveSettings: StampSettings,
   setSettings: React.Dispatch<React.SetStateAction<StampSettings>>,
-  thickenEnabled: boolean,
 ) {
   const [isAutoFitting, setIsAutoFitting] = useState(false);
   const workerRef = useRef<Worker | null>(null);
@@ -312,9 +312,7 @@ function useAutoFit(
       shapes: serialized,
       contentW,
       contentH,
-      nozzleDiameter: thickenEnabled
-        ? effectiveSettings.nozzleDiameter / 2
-        : effectiveSettings.nozzleDiameter,
+      nozzleDiameter: effectiveSettings.nozzleDiameter,
     });
   } : undefined;
 
@@ -383,6 +381,8 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     [afterThicken.data],
   );
 
+  const thinFeatureMap = afterThicken.data?.thinFeatureMap ?? null;
+
   const rawDesignShapes = useMemo(
     () => imageData ? designDataToShapes(imageData) : [],
     [imageData],
@@ -391,13 +391,13 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   const isProcessing = trace.isTracing || afterThicken.isProcessing || afterSmooth.isProcessing;
 
   // Auto-fit (on-demand, uses pre-pipeline shapes for idempotency)
-  const { isAutoFitting, onFindMinWidth } = useAutoFit(rawDesignShapes, effectiveSettings, setSettings, thickenEnabled);
+  const { isAutoFitting, onFindMinWidth } = useAutoFit(rawDesignShapes, effectiveSettings, setSettings);
 
   // Combined pipeline progress
   const { pipelineProgress, pipelineStage } = useMemo(() => {
     const steps: { active: boolean; progress: number; label: string }[] = [];
     if (trace.isTracing) steps.push({ active: true, progress: trace.traceProgress, label: trace.traceStage || "Tracing…" });
-    if (thickenEnabled && merged) steps.push({ active: afterThicken.isProcessing, progress: afterThicken.isProcessing ? afterThicken.progress : 1, label: "Thickening…" });
+    if (afterThicken.isProcessing) steps.push({ active: true, progress: afterThicken.progress, label: thickenEnabled ? "Thickening…" : "Checking features…" });
     if (smoothEnabled && merged) steps.push({ active: afterSmooth.isProcessing, progress: afterSmooth.isProcessing ? afterSmooth.progress : 1, label: "Smoothing…" });
     if (steps.length === 0) return { pipelineProgress: 0, pipelineStage: "" };
     const total = steps.reduce((sum, s) => sum + s.progress, 0) / steps.length;
@@ -409,6 +409,7 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     shapes,
     effectiveSettings,
     rawDesignShapes,
+    thinFeatureMap,
     isTracing: trace.isTracing,
     traceProgress: trace.traceProgress,
     traceStage: trace.traceStage,

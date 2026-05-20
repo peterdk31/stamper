@@ -8,7 +8,8 @@
  * Merge: combine all sources into a single DesignData
  *
  * Processing steps (sequential, DesignData → DesignData):
- *   3. Thicken (optional) — dilate thin features for nozzle width
+ *   3. Smooth (optional) — smooth contour curves
+ *   4. Thicken (optional) — dilate thin features for nozzle width
  *   [Add new steps here]
  *
  * Output:
@@ -31,6 +32,6 @@ import { thickenStep } from "./thicken";
 import { smoothStep } from "./smooth";
 
 export const PROCESSING_STEPS: PipelineStep[] = [
-  thickenStep,
   smoothStep,
+  thickenStep,
 ];

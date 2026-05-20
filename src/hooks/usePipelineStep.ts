@@ -78,7 +78,7 @@ export function usePipelineStep(
       }
 
       const parsed = step.parseResult(e.data, input);
-      if (parsed !== input) {
+      if (parsed !== null) {
         dispatch({ type: "done", data: parsed });
       }
     };
@@ -88,14 +88,14 @@ export function usePipelineStep(
       dispatch({ type: "error" });
     };
 
-    worker.postMessage(step.buildMessage(input, settings));
+    worker.postMessage(step.buildMessage(input, settings, flags));
 
     return () => {
       worker.terminate();
       if (workerRef.current === worker) workerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, input, settings.width, settings.height, settings.nozzleDiameter, step]);
+  }, [enabled, input, settings.width, settings.height, settings.nozzleDiameter, step, flags.thickenEnabled, flags.smoothEnabled]);
 
   if (!enabled) return { data: input, isProcessing: false, progress: 0 };
   if (step.type === "sync") return { data: syncResult ?? input, isProcessing: false, progress: 0 };

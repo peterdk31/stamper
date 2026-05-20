@@ -17,8 +17,8 @@ export type WorkerStep = {
   type: "worker";
   enabled: (settings: StampSettings, flags: StepFlags) => boolean;
   createWorker: () => Worker;
-  buildMessage: (data: DesignData, settings: StampSettings) => unknown;
-  parseResult: (message: unknown, prevData: DesignData) => DesignData;
+  buildMessage: (data: DesignData, settings: StampSettings, flags: StepFlags) => unknown;
+  parseResult: (message: unknown, prevData: DesignData) => DesignData | null;
   parseProgress?: (message: unknown) => number | null;
 };
 

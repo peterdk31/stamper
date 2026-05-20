@@ -1,33 +1,39 @@
 import type { DesignData, StampSettings } from "@/types/stamp";
 import type { ThickenMessage } from "@/lib/thicken.worker";
-import type { WorkerStep } from "./types";
+import type { WorkerStep, StepFlags } from "./types";
 
 export const thickenStep: WorkerStep = {
   name: "thicken",
   type: "worker",
 
-  enabled: (_settings: StampSettings, flags) => flags.thickenEnabled,
+  enabled: () => true,
 
   createWorker: () =>
     new Worker(new URL("../thicken.worker.ts", import.meta.url)),
 
-  buildMessage: (data: DesignData, settings: StampSettings) => ({
+  buildMessage: (data: DesignData, settings: StampSettings, flags: StepFlags) => ({
     shapes: data.shapes,
     stampWidth: settings.width,
     stampHeight: settings.height,
     nozzleDiameter: settings.nozzleDiameter,
+    thickenEnabled: flags.thickenEnabled,
+    smoothEnabled: flags.smoothEnabled,
   }),
 
-  parseResult: (message: unknown, prevData: DesignData): DesignData => {
+  parseResult: (message: unknown, prevData: DesignData) => {
     const msg = message as ThickenMessage;
     if (msg.type === "result") {
-      return {
-        shapes: msg.shapes,
-        bounds: msg.bounds,
-        sourceAspectRatio: prevData.sourceAspectRatio,
-      };
+      if (msg.shapesModified) {
+        return {
+          shapes: msg.shapes,
+          bounds: msg.bounds,
+          sourceAspectRatio: prevData.sourceAspectRatio,
+          thinFeatureMap: msg.thinFeatureMap,
+        };
+      }
+      return { ...prevData, thinFeatureMap: msg.thinFeatureMap };
     }
-    return prevData;
+    return null;
   },
 
   parseProgress: (message: unknown): number | null => {

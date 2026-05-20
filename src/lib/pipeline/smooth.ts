@@ -15,7 +15,7 @@ export const smoothStep: WorkerStep = {
     shapes: data.shapes,
   }),
 
-  parseResult: (message: unknown, prevData: DesignData): DesignData => {
+  parseResult: (message: unknown, prevData: DesignData) => {
     const msg = message as SmoothMessage;
     if (msg.type === "result") {
       return {
@@ -24,7 +24,7 @@ export const smoothStep: WorkerStep = {
         sourceAspectRatio: prevData.sourceAspectRatio,
       };
     }
-    return prevData;
+    return null;
   },
 
   parseProgress: (message: unknown): number | null => {

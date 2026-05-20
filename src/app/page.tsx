@@ -77,7 +77,7 @@ export default function Home() {
 
       <div className="max-w-7xl mx-auto p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 sm:gap-6">
         <section className="order-2 lg:order-1">
-          <StampPreview settings={pipeline.effectiveSettings} shapes={pipeline.shapes} exportName={exportName} />
+          <StampPreview settings={pipeline.effectiveSettings} shapes={pipeline.shapes} exportName={exportName} thinFeatureMap={pipeline.thinFeatureMap} />
         </section>
 
         <aside className="space-y-4 order-1 lg:order-2">

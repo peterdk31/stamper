@@ -1,3 +1,5 @@
+import { squaredEDT, initEDT, detectThinPixels } from "./edt";
+
 interface Point {
   x: number;
   y: number;
@@ -17,67 +19,24 @@ export interface ThickenRequest {
   stampWidth: number;
   stampHeight: number;
   nozzleDiameter: number;
+  thickenEnabled: boolean;
+  smoothEnabled: boolean;
+}
+
+interface ThinFeatureMapData {
+  hasThinFeatures: boolean;
+  pixels: Uint8Array;
+  gridW: number;
+  gridH: number;
 }
 
 export type ThickenMessage =
   | { type: "progress"; progress: number; stage: string }
-  | { type: "result"; shapes: ShapeData[]; bounds: BoundsData };
+  | { type: "result"; shapesModified: boolean; shapes: ShapeData[]; bounds: BoundsData; thinFeatureMap: ThinFeatureMapData };
 
 const RESOLUTION = 0.05; // mm per pixel
-const INF = 1e10;
-
-function dt1d(f: Float32Array, n: number): Float32Array {
-  const d = new Float32Array(n);
-  const v = new Int32Array(n);
-  const z = new Float32Array(n + 1);
-
-  let k = 0;
-  v[0] = 0;
-  z[0] = -INF;
-  z[1] = INF;
-
-  for (let q = 1; q < n; q++) {
-    let s: number;
-    for (;;) {
-      s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
-      if (s > z[k]) break;
-      k--;
-    }
-    k++;
-    v[k] = q;
-    z[k] = s;
-    z[k + 1] = INF;
-  }
-
-  k = 0;
-  for (let q = 0; q < n; q++) {
-    while (z[k + 1] < q) k++;
-    d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
-  }
-
-  return d;
-}
-
-function squaredEDT(grid: Float32Array, w: number, h: number): Float32Array {
-  const result = new Float32Array(w * h);
-  result.set(grid);
-
-  const buf = new Float32Array(Math.max(w, h));
-
-  for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) buf[y] = result[y * w + x];
-    const d = dt1d(buf, h);
-    for (let y = 0; y < h; y++) result[y * w + x] = d[y];
-  }
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) buf[x] = result[y * w + x];
-    const d = dt1d(buf, w);
-    for (let x = 0; x < w; x++) result[y * w + x] = d[x];
-  }
-
-  return result;
-}
+const DETECT_RESOLUTION = 0.1; // mm per pixel for thin-feature texture
+const MIN_THIN_PIXELS = 20;
 
 function perpendicularDistance(point: Point, lineStart: Point, lineEnd: Point): number {
   const dx = lineEnd.x - lineStart.x;
@@ -246,6 +205,35 @@ function pointInContour(px: number, py: number, contour: Point[]): boolean {
   return inside;
 }
 
+function taubinSmooth(points: Point[], iterations: number): Point[] {
+  if (points.length < 3) return points;
+  const lambda = 0.5;
+  const mu = -0.53;
+  const n = points.length;
+  const xs = new Float64Array(n);
+  const ys = new Float64Array(n);
+  for (let i = 0; i < n; i++) { xs[i] = points[i].x; ys[i] = points[i].y; }
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const factor = iter % 2 === 0 ? lambda : mu;
+    const nx = new Float64Array(n);
+    const ny = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const prev = (i - 1 + n) % n;
+      const next = (i + 1) % n;
+      const lx = (xs[prev] + xs[next]) / 2 - xs[i];
+      const ly = (ys[prev] + ys[next]) / 2 - ys[i];
+      nx[i] = xs[i] + factor * lx;
+      ny[i] = ys[i] + factor * ly;
+    }
+    for (let i = 0; i < n; i++) { xs[i] = nx[i]; ys[i] = ny[i]; }
+  }
+
+  const result: Point[] = new Array(n);
+  for (let i = 0; i < n; i++) result[i] = { x: xs[i], y: ys[i] };
+  return result;
+}
+
 function nestContoursToShapes(contours: Point[][]): ShapeData[] {
   if (contours.length === 0) return [];
 
@@ -288,8 +276,54 @@ function nestContoursToShapes(contours: Point[][]): ShapeData[] {
   return shapes;
 }
 
+function buildThinFeatureMap(
+  finalMask: Uint8Array,
+  sqDistToBg: Float32Array,
+  gridW: number,
+  gridH: number,
+  stampWidth: number,
+  stampHeight: number,
+  nozzleDiameter: number,
+): ThinFeatureMapData {
+  const n = gridW * gridH;
+  const rPx = nozzleDiameter / 2 / RESOLUTION;
+  const radiusSq = rPx * rPx;
+
+  const thin = detectThinPixels(finalMask, sqDistToBg, gridW, gridH, radiusSq);
+
+  let thinCount = 0;
+  for (let i = 0; i < n; i++) if (thin[i]) thinCount++;
+  const hasThinFeatures = thinCount >= MIN_THIN_PIXELS;
+
+  const outW = Math.ceil(stampWidth / DETECT_RESOLUTION) + 1;
+  const outH = Math.ceil(stampHeight / DETECT_RESOLUTION) + 1;
+  const pixels = new Uint8Array(outW * outH * 4);
+
+  if (hasThinFeatures) {
+    for (let oy = 0; oy < outH; oy++) {
+      const mmY = oy * DETECT_RESOLUTION;
+      const gy = Math.round((stampHeight - mmY) / RESOLUTION) + 1;
+      for (let ox = 0; ox < outW; ox++) {
+        const mmX = ox * DETECT_RESOLUTION;
+        const gx = Math.round(mmX / RESOLUTION) + 1;
+        if (gx >= 0 && gx < gridW && gy >= 0 && gy < gridH) {
+          if (thin[gy * gridW + gx]) {
+            const idx = (oy * outW + ox) * 4;
+            pixels[idx] = 230;
+            pixels[idx + 1] = 38;
+            pixels[idx + 2] = 38;
+            pixels[idx + 3] = 255;
+          }
+        }
+      }
+    }
+  }
+
+  return { hasThinFeatures, pixels, gridW: outW, gridH: outH };
+}
+
 self.onmessage = (e: MessageEvent<ThickenRequest>) => {
-  const { shapes, stampWidth, stampHeight, nozzleDiameter } = e.data;
+  const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled, smoothEnabled } = e.data;
   const post = self.postMessage.bind(self);
 
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);
@@ -342,31 +376,78 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     mask[i] = imageData.data[i * 4] > 128 ? 1 : 0;
   }
 
-  post({ type: "progress", progress: 0.2, stage: "Computing distance field…" } as ThickenMessage);
-
-  const dtInput = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    dtInput[i] = mask[i] ? 0 : INF;
-  }
-  const sqDistToFilled = squaredEDT(dtInput, gridW, gridH);
-
-  post({ type: "progress", progress: 0.4, stage: "Dilating features…" } as ThickenMessage);
+  post({ type: "progress", progress: 0.15, stage: "Computing distance fields…" } as ThickenMessage);
 
   const radiusPx = nozzleDiameter / 2 / RESOLUTION;
   const radiusSq = radiusPx * radiusPx;
 
-  const dilated = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    if (mask[i] || sqDistToFilled[i] <= radiusSq) {
-      dilated[i] = 1;
+  const sqDistToBg = squaredEDT(initEDT(mask, n, false), gridW, gridH);
+
+  if (!thickenEnabled) {
+    // Detection only — no thickening
+    post({ type: "progress", progress: 0.5, stage: "Detecting thin features…" } as ThickenMessage);
+    const thinFeatureMap = buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter);
+
+    post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
+    const result: ThickenMessage = {
+      type: "result", shapesModified: false,
+      shapes: [], bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+      thinFeatureMap,
+    };
+    self.postMessage(result, { transfer: [thinFeatureMap.pixels.buffer] } as unknown as StructuredSerializeOptions);
+    return;
+  }
+
+  // --- Thickening path ---
+  post({ type: "progress", progress: 0.25, stage: "Finding thin features…" } as ThickenMessage);
+
+  // Skeleton of thin features: local maxima of sqDistToBg where feature < nozzle diameter
+  const skeleton = new Uint8Array(n);
+  let hasSkeleton = false;
+  for (let y = 0; y < gridH; y++) {
+    for (let x = 0; x < gridW; x++) {
+      const i = y * gridW + x;
+      if (!mask[i] || sqDistToBg[i] >= radiusSq) continue;
+
+      const val = sqDistToBg[i];
+      let isMax = true;
+      for (let dy = -1; dy <= 1 && isMax; dy++) {
+        for (let dx = -1; dx <= 1 && isMax; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const ny = y + dy, nx = x + dx;
+          if (ny < 0 || ny >= gridH || nx < 0 || nx >= gridW) continue;
+          const ni = ny * gridW + nx;
+          if (mask[ni] && sqDistToBg[ni] > val) isMax = false;
+        }
+      }
+
+      if (isMax) {
+        skeleton[i] = 1;
+        hasSkeleton = true;
+      }
     }
   }
 
-  post({ type: "progress", progress: 0.5, stage: "Tracing contours…" } as ThickenMessage);
+  post({ type: "progress", progress: 0.35, stage: "Thickening…" } as ThickenMessage);
+
+  let dilated: Uint8Array;
+  if (hasSkeleton) {
+    const sqDistToSkel = squaredEDT(initEDT(skeleton, n, true), gridW, gridH);
+    dilated = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (mask[i] || sqDistToSkel[i] <= radiusSq) {
+        dilated[i] = 1;
+      }
+    }
+  } else {
+    dilated = mask;
+  }
+
+  post({ type: "progress", progress: 0.45, stage: "Tracing contours…" } as ThickenMessage);
 
   const rawContours = marchingSquares(dilated, gridW, gridH);
 
-  post({ type: "progress", progress: 0.8, stage: "Simplifying…" } as ThickenMessage);
+  post({ type: "progress", progress: 0.65, stage: "Simplifying…" } as ThickenMessage);
 
   const MIN_CONTOUR_AREA = 4;
   const DEDUP_SQ = RESOLUTION * RESOLUTION * 0.25;
@@ -393,7 +474,12 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     if (clean.length >= 3) contours.push(clean);
   }
 
-  const resultShapes = nestContoursToShapes(contours);
+  const TAUBIN_ITERATIONS = 12;
+  const finalContours = smoothEnabled
+    ? contours.map((c) => taubinSmooth(c, TAUBIN_ITERATIONS))
+    : contours;
+
+  const resultShapes = nestContoursToShapes(finalContours);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of resultShapes) {
     for (const p of s.outer) {
@@ -407,6 +493,16 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     ? { minX: 0, minY: 0, maxX: 0, maxY: 0 }
     : { minX, minY, maxX, maxY };
 
+  // Detect thin features on the thickened output
+  post({ type: "progress", progress: 0.8, stage: "Verifying thickness…" } as ThickenMessage);
+  const sqDistToBgDilated = squaredEDT(initEDT(dilated, n, false), gridW, gridH);
+  const thinFeatureMap = buildThinFeatureMap(dilated, sqDistToBgDilated, gridW, gridH, stampWidth, stampHeight, nozzleDiameter);
+
   post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
-  post({ type: "result", shapes: resultShapes, bounds } as ThickenMessage);
+  const result: ThickenMessage = {
+    type: "result", shapesModified: true,
+    shapes: resultShapes, bounds,
+    thinFeatureMap,
+  };
+  self.postMessage(result, { transfer: [thinFeatureMap.pixels.buffer] } as unknown as StructuredSerializeOptions);
 };

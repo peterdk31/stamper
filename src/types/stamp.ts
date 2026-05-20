@@ -64,8 +64,15 @@ export interface StampProject {
 
 export interface StampPoint { x: number; y: number }
 export interface StampShapeData { outer: StampPoint[]; holes: StampPoint[][] }
+export interface ThinFeatureMap {
+  hasThinFeatures: boolean;
+  pixels: Uint8Array;
+  gridW: number;
+  gridH: number;
+}
 export interface DesignData {
   shapes: StampShapeData[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   sourceAspectRatio: number | null;
+  thinFeatureMap?: ThinFeatureMap;
 }
