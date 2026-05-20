@@ -286,12 +286,19 @@ function buildThinFeatureMap(
   stampHeight: number,
   nozzleDiameter: number,
   border: number,
+  restrictMask?: Uint8Array,
 ): ThinFeatureMapData {
   const n = gridW * gridH;
   const rPx = nozzleDiameter / 2 / RESOLUTION;
   const radiusSq = rPx * rPx;
 
   const thin = detectThinPixels(finalMask, sqDistToBg, gridW, gridH, radiusSq);
+
+  if (restrictMask) {
+    for (let i = 0; i < n; i++) {
+      if (!restrictMask[i]) thin[i] = 0;
+    }
+  }
 
   let thinCount = 0;
   for (let i = 0; i < n; i++) if (thin[i]) thinCount++;
@@ -594,7 +601,9 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     ? { minX: 0, minY: 0, maxX: 0, maxY: 0 }
     : { minX, minY, maxX, maxY };
 
-  const thinFeatureMap = emptyThinFeatureMap(stampWidth, stampHeight);
+  const thinFeatureMap = textShapes.length > 0
+    ? buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border, textMask)
+    : emptyThinFeatureMap(stampWidth, stampHeight);
 
   post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
   const result: ThickenMessage = {
