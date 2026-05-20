@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { StampPoint, StampShapeData, DesignData } from "@/types/stamp";
+import { hasSelfIntersection } from "./contour-utils";
 
 export function computeBounds(shapes: StampShapeData[]): DesignData["bounds"] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -48,6 +49,7 @@ export function designDataToShapes(data: DesignData): THREE.Shape[] {
   const result: THREE.Shape[] = [];
   for (const sd of data.shapes) {
     if (sd.outer.length < 3) continue;
+    if (sd.outer.length <= 200 && hasSelfIntersection(sd.outer)) continue;
     const shape = new THREE.Shape();
     shape.moveTo(sd.outer[0].x, sd.outer[0].y);
     for (let i = 1; i < sd.outer.length; i++) shape.lineTo(sd.outer[i].x, sd.outer[i].y);
@@ -55,6 +57,7 @@ export function designDataToShapes(data: DesignData): THREE.Shape[] {
 
     for (const hole of sd.holes) {
       if (hole.length < 3) continue;
+      if (hole.length <= 200 && hasSelfIntersection(hole)) continue;
       const path = new THREE.Path();
       path.moveTo(hole[0].x, hole[0].y);
       for (let i = 1; i < hole.length; i++) path.lineTo(hole[i].x, hole[i].y);

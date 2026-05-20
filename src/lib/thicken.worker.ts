@@ -164,7 +164,7 @@ function marchingSquares(grid: Uint8Array, w: number, h: number): Point[][] {
       cur = next;
     }
 
-    if (ids.length < 3) continue;
+    if (ids.length < 3 || cur !== start) continue;
 
     const points: Point[] = new Array(ids.length);
     for (let i = 0; i < ids.length; i++) {

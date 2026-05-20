@@ -1,3 +1,5 @@
+import { hasSelfIntersection } from "./contour-utils";
+
 interface Point {
   x: number;
   y: number;
@@ -350,8 +352,11 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     const total = contours.length;
     const simplified: Point[][] = [];
     for (let i = 0; i < total; i++) {
-      const s = simplifyContour(contours[i], 0.5);
-      if (s.length >= 3) simplified.push(s);
+      let s = simplifyContour(contours[i], 0.5);
+      if (s.length >= 3 && hasSelfIntersection(s)) {
+        s = simplifyContour(contours[i], 0.15);
+      }
+      if (s.length >= 3 && !hasSelfIntersection(s)) simplified.push(s);
       if (i % 20 === 0) report(0.70 + 0.20 * (i / total), "Simplifying…");
     }
     const minArea = Math.max(4, trimW * trimH * 0.00005);
