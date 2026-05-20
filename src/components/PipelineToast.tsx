@@ -4,18 +4,13 @@ interface Props {
   isProcessing: boolean;
   pipelineProgress: number;
   pipelineStage: string;
-  isAutoFitting: boolean;
 }
 
-export default function PipelineToast({ isProcessing, pipelineProgress, pipelineStage, isAutoFitting }: Props) {
-  const active = isProcessing || isAutoFitting;
-  if (!active) return null;
+export default function PipelineToast({ isProcessing, pipelineProgress, pipelineStage }: Props) {
+  if (!isProcessing) return null;
 
-  const label = isAutoFitting && !isProcessing
-    ? "Auto-fitting…"
-    : pipelineStage || "Processing…";
-
-  const progress = isAutoFitting && !isProcessing ? -1 : pipelineProgress;
+  const label = pipelineStage || "Processing…";
+  const progress = pipelineProgress;
 
   return (
     <div className="fixed bottom-3 left-3 right-3 z-50 bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 sm:right-auto sm:w-64">

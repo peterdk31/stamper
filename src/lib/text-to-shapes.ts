@@ -257,6 +257,40 @@ export function computeRequiredHeight(
   return topH + topGaps + imageH + bottomGaps + bottomH;
 }
 
+export function computeRequiredWidth(
+  texts: StampText[],
+  fontCache: Map<string, Font>,
+  targetHeight: number,
+  hasImage: boolean,
+  imageAspectRatio: number | null,
+): number | null {
+  const hasTexts = texts.some((t) => t.content.trim() && fontCache.has(t.fontFamily));
+
+  if (!hasTexts) {
+    if (hasImage && imageAspectRatio && imageAspectRatio > 0) {
+      return targetHeight * imageAspectRatio;
+    }
+    return null;
+  }
+
+  const lo = 10;
+  const hi = 200;
+  const hLo = computeRequiredHeight(texts, fontCache, lo, hasImage, imageAspectRatio);
+  const hHi = computeRequiredHeight(texts, fontCache, hi, hasImage, imageAspectRatio);
+  if (hLo === null || hHi === null) return null;
+  if (hLo >= targetHeight) return lo;
+  if (hHi <= targetHeight) return hi;
+
+  let a = lo, b = hi;
+  for (let i = 0; i < 30; i++) {
+    const mid = (a + b) / 2;
+    const h = computeRequiredHeight(texts, fontCache, mid, hasImage, imageAspectRatio);
+    if (h === null) return null;
+    if (h < targetHeight) a = mid; else b = mid;
+  }
+  return Math.round((a + b) / 2 * 10) / 10;
+}
+
 // ---------------------------------------------------------------------------
 // Render placements to THREE.Shape[]
 // ---------------------------------------------------------------------------

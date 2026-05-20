@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
-import { DEFAULT_STAMP_SETTINGS, type StampSettings, type StampText } from "@/types/stamp";
+import { DEFAULT_STAMP_SETTINGS, type StampSettings, type StampText, type FitDimension } from "@/types/stamp";
 import { loadAllBundledFonts, type FontEntry } from "@/lib/font-manager";
 import StampSettingsPanel from "@/components/StampSettingsPanel";
 import ImageUpload from "@/components/ImageUpload";
@@ -47,6 +47,18 @@ export default function Home() {
     smoothEnabled,
   });
 
+  const prevImageRef = useRef<string | null>(null);
+  useEffect(() => {
+    const currentImage = imageDataUrl ?? svgText;
+    if (currentImage && currentImage !== prevImageRef.current && pipeline.sourceAspectRatio != null) {
+      prevImageRef.current = currentImage;
+      const fit: FitDimension = pipeline.sourceAspectRatio < 1 ? "height" : "width";
+      setSettings((s) => s.fitDimension !== fit ? { ...s, fitDimension: fit } : s);
+    } else if (!currentImage) {
+      prevImageRef.current = null;
+    }
+  }, [imageDataUrl, svgText, pipeline.sourceAspectRatio]);
+
   const handleImageChange = useCallback((dataUrl: string | null, fileName?: string) => {
     setImageDataUrl(dataUrl);
     setImageName(dataUrl ? (fileName ?? null) : null);
@@ -72,7 +84,6 @@ export default function Home() {
         isProcessing={pipeline.isProcessing}
         pipelineProgress={pipeline.pipelineProgress}
         pipelineStage={pipeline.pipelineStage}
-        isAutoFitting={pipeline.isAutoFitting}
       />
 
       <div className="max-w-7xl mx-auto p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 sm:gap-6">
@@ -107,7 +118,6 @@ export default function Home() {
             hasDesign={pipeline.hasDesign}
             onThickenToggle={() => setThickenEnabled((v) => !v)}
             onSmoothToggle={() => setSmoothEnabled((v) => !v)}
-            onFindMinWidth={pipeline.onFindMinWidth}
           />
         </aside>
       </div>

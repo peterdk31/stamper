@@ -5,10 +5,9 @@ import * as THREE from "three";
 import type { StampSettings, StampText, DesignData, ThinFeatureMap } from "@/types/stamp";
 import type { StampShapeData } from "@/types/stamp";
 import type { TraceMessage } from "@/lib/image-trace.worker";
-import type { AutoFitResult } from "@/lib/auto-fit.worker";
 import { rasterToDesignData, designDataToShapes } from "@/lib/design-data";
 import { getFontCache } from "@/lib/font-manager";
-import { computeRequiredHeight } from "@/lib/text-to-shapes";
+import { computeRequiredHeight, computeRequiredWidth } from "@/lib/text-to-shapes";
 import { textToDesignData } from "@/lib/pipeline/text";
 import { mergeDesignData } from "@/lib/pipeline/merge";
 import { thickenStep } from "@/lib/pipeline/thicken";
@@ -42,13 +41,12 @@ export interface PipelineOutputs {
   traceStage: string;
   isThickening: boolean;
   isSmoothing: boolean;
-  isAutoFitting: boolean;
   isProcessing: boolean;
   pipelineProgress: number;
   pipelineStage: string;
   hasDesign: boolean;
 
-  onFindMinWidth: (() => void) | undefined;
+  sourceAspectRatio: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,105 +232,54 @@ function useEffectiveSettings(
   fontsReady: boolean,
   hasImage: boolean,
 ): StampSettings {
-  const effectiveHeight = useMemo(() => {
-    if (!settings.autoSize) return settings.height;
+  const minDim = settings.threadEnabled
+    ? Math.max(10, settings.threadConfig.majorDiameter + 4)
+    : 10;
+
+  const effectiveDims = useMemo(() => {
+    if (!settings.autoSize) return { width: settings.width, height: settings.height };
 
     const hasTexts = texts.length > 0 && fontsReady;
+    if (!hasTexts && !sourceAspectRatio) return { width: settings.width, height: settings.height };
 
-    if (!hasTexts && !sourceAspectRatio) return settings.height;
+    if (settings.fitDimension === "height") {
+      if (hasTexts) {
+        const w = computeRequiredWidth(texts, getFontCache(), settings.height, hasImage, sourceAspectRatio);
+        if (w !== null) {
+          return { width: Math.round(Math.max(minDim, w) * 10) / 10, height: settings.height };
+        }
+      } else if (sourceAspectRatio && sourceAspectRatio > 0) {
+        const w = settings.height * sourceAspectRatio;
+        return { width: Math.round(Math.max(minDim, w) * 10) / 10, height: settings.height };
+      }
+      return { width: settings.width, height: settings.height };
+    }
 
     const required = hasTexts
       ? computeRequiredHeight(texts, getFontCache(), settings.width, hasImage, sourceAspectRatio)
       : null;
 
     if (required !== null) {
-      const minHeight = settings.threadEnabled
-        ? Math.max(10, settings.threadConfig.majorDiameter + 4)
-        : 10;
-      return Math.round(Math.max(minHeight, required) * 10) / 10;
+      return { width: settings.width, height: Math.round(Math.max(minDim, required) * 10) / 10 };
     }
 
     if (sourceAspectRatio && sourceAspectRatio > 0) {
       const h = settings.width / sourceAspectRatio;
-      const minHeight = settings.threadEnabled
-        ? Math.max(10, settings.threadConfig.majorDiameter + 4)
-        : 10;
-      return Math.round(Math.max(minHeight, h) * 10) / 10;
+      return { width: settings.width, height: Math.round(Math.max(minDim, h) * 10) / 10 };
     }
 
-    return settings.height;
+    return { width: settings.width, height: settings.height };
   }, [
-    settings.autoSize, settings.height, settings.width,
-    settings.threadEnabled, settings.threadConfig.majorDiameter,
-    sourceAspectRatio, texts, fontsReady, hasImage,
+    settings.autoSize, settings.fitDimension, settings.height, settings.width,
+    minDim, sourceAspectRatio, texts, fontsReady, hasImage,
   ]);
 
   return useMemo(
-    () => effectiveHeight !== settings.height ? { ...settings, height: effectiveHeight } : settings,
-    [settings, effectiveHeight],
+    () => (effectiveDims.width !== settings.width || effectiveDims.height !== settings.height)
+      ? { ...settings, width: effectiveDims.width, height: effectiveDims.height }
+      : settings,
+    [settings, effectiveDims.width, effectiveDims.height],
   );
-}
-
-// ---------------------------------------------------------------------------
-// Auto-fit width (on-demand worker, not a pipeline step)
-// ---------------------------------------------------------------------------
-
-function useAutoFit(
-  rawDesignShapes: THREE.Shape[],
-  effectiveSettings: StampSettings,
-  setSettings: React.Dispatch<React.SetStateAction<StampSettings>>,
-) {
-  const [isAutoFitting, setIsAutoFitting] = useState(false);
-  const workerRef = useRef<Worker | null>(null);
-
-  const onFindMinWidth = rawDesignShapes.length > 0 ? () => {
-    if (isAutoFitting) return;
-    setIsAutoFitting(true);
-
-    const box = new THREE.Box2();
-    for (const s of rawDesignShapes) {
-      for (const p of s.getPoints()) box.expandByPoint(p);
-      for (const h of s.holes) for (const p of h.getPoints()) box.expandByPoint(p);
-    }
-    const contentW = box.max.x - box.min.x;
-    const contentH = box.max.y - box.min.y;
-    if (contentW <= 0 || contentH <= 0) { setIsAutoFitting(false); return; }
-
-    const serialized = rawDesignShapes.map((s) => ({
-      outer: s.getPoints(48).map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y })),
-      holes: s.holes.map((h) => h.getPoints(48).map((p) => ({ x: p.x - box.min.x, y: p.y - box.min.y }))),
-    }));
-
-    if (workerRef.current) workerRef.current.terminate();
-    const worker = new Worker(new URL("../lib/auto-fit.worker.ts", import.meta.url));
-    workerRef.current = worker;
-
-    worker.onmessage = (e: MessageEvent<AutoFitResult>) => {
-      if (e.data.type === "result") {
-        const minSize = effectiveSettings.threadEnabled
-          ? Math.max(10, effectiveSettings.threadConfig.majorDiameter + 4)
-          : 10;
-        setSettings((s) => ({ ...s, width: Math.max(minSize, e.data.width) }));
-      }
-      setIsAutoFitting(false);
-      worker.terminate();
-      workerRef.current = null;
-    };
-    worker.onerror = () => {
-      setIsAutoFitting(false);
-      worker.terminate();
-      workerRef.current = null;
-    };
-
-    worker.postMessage({
-      shapes: serialized,
-      contentW,
-      contentH,
-      nozzleDiameter: effectiveSettings.nozzleDiameter,
-    });
-  } : undefined;
-
-  return { isAutoFitting, onFindMinWidth };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,9 +353,6 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
 
   const isProcessing = trace.isTracing || afterThicken.isProcessing || afterSmooth.isProcessing;
 
-  // Auto-fit (on-demand, uses pre-pipeline shapes for idempotency)
-  const { isAutoFitting, onFindMinWidth } = useAutoFit(rawDesignShapes, effectiveSettings, setSettings);
-
   // Combined pipeline progress
   const { pipelineProgress, pipelineStage } = useMemo(() => {
     const steps: { active: boolean; progress: number; label: string }[] = [];
@@ -431,11 +375,10 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     traceStage: trace.traceStage,
     isThickening: afterThicken.isProcessing,
     isSmoothing: afterSmooth.isProcessing,
-    isAutoFitting,
     isProcessing,
     pipelineProgress,
     pipelineStage,
     hasDesign: rawDesignShapes.length > 0,
-    onFindMinWidth,
+    sourceAspectRatio: trace.sourceAspectRatio,
   };
 }

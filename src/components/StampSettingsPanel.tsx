@@ -9,7 +9,6 @@ import SliderInput from "./SliderInput";
 interface Props {
   settings: StampSettings;
   onChange: (settings: StampSettings) => void;
-  onFindMinWidth?: () => void;
   thickenEnabled?: boolean;
   isThickening?: boolean;
   smoothEnabled?: boolean;
@@ -19,7 +18,7 @@ interface Props {
   onSmoothToggle?: () => void;
 }
 
-export default function StampSettingsPanel({ settings, onChange, onFindMinWidth, thickenEnabled, isThickening, smoothEnabled, isSmoothing, hasDesign, onThickenToggle, onSmoothToggle }: Props) {
+export default function StampSettingsPanel({ settings, onChange, thickenEnabled, isThickening, smoothEnabled, isSmoothing, hasDesign, onThickenToggle, onSmoothToggle }: Props) {
   function update(partial: Partial<StampSettings>) {
     onChange({ ...settings, ...partial });
   }
@@ -38,23 +37,8 @@ export default function StampSettingsPanel({ settings, onChange, onFindMinWidth,
 
       <fieldset className="space-y-3">
         <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Dimensions</legend>
-        <SliderInput label="Width" unit="mm" value={settings.width} min={minSize} max={200} step={1}
-          onChange={(v) => update({ width: v })}
-          headerRight={onFindMinWidth ? (
-            <button
-              onClick={onFindMinWidth}
-              title="Find smallest printable width for your nozzle"
-              className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium"
-            >
-              Auto-fit
-            </button>
-          ) : undefined}
-        />
-        <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
-          onChange={(v) => update({ height: v, autoSize: false })}
-          disabled={settings.autoSize} />
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700">Auto-size height</label>
+          <label className="text-sm font-medium text-gray-700">Auto-size</label>
           <button
             onClick={() => update({ autoSize: !settings.autoSize })}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -66,6 +50,40 @@ export default function StampSettingsPanel({ settings, onChange, onFindMinWidth,
             }`} />
           </button>
         </div>
+        {settings.autoSize && (
+          <div className="flex items-center gap-1 text-sm">
+            <span className="text-sm font-medium text-gray-700 mr-2">Fit to</span>
+            <button
+              onClick={() => update({ fitDimension: "width", width: settings.width })}
+              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                settings.fitDimension === "width"
+                  ? "bg-amber-700 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Width
+            </button>
+            <button
+              onClick={() => update({ fitDimension: "height", height: settings.height })}
+              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                settings.fitDimension === "height"
+                  ? "bg-amber-700 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Height
+            </button>
+          </div>
+        )}
+        <SliderInput label="Width" unit="mm" value={settings.width} min={minSize} max={200} step={1}
+          onChange={(v) => update({ width: v })}
+          disabled={settings.autoSize && settings.fitDimension === "height"}
+        />
+        <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
+          onChange={(v) => settings.autoSize && settings.fitDimension === "height"
+            ? update({ height: v })
+            : update({ height: v, autoSize: false })}
+          disabled={settings.autoSize && settings.fitDimension === "width"} />
         <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
           onChange={(v) => update({ margin: v })} />
         <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
