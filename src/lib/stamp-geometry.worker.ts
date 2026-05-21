@@ -1,6 +1,7 @@
 import {
   Shape, Path, ExtrudeGeometry, BufferGeometry, Float32BufferAttribute,
 } from "three";
+import { simplifyContour } from "./simplify";
 
 interface PointData { x: number; y: number }
 interface ShapeInput { outer: PointData[]; holes: PointData[][] }
@@ -79,21 +80,26 @@ function mirrorShapes(shapes: Shape[], width: number): Shape[] {
   });
 }
 
+const SIMPLIFY_TOLERANCE = 0.05;
+
 function toShapes(data: ShapeInput[]): Shape[] {
   return data.filter(sd => sd.outer.length >= 3).map(sd => {
+    const outer = simplifyContour(sd.outer, SIMPLIFY_TOLERANCE);
+    if (outer.length < 3) return null;
     const shape = new Shape();
-    shape.moveTo(sd.outer[0].x, sd.outer[0].y);
-    for (let i = 1; i < sd.outer.length; i++) shape.lineTo(sd.outer[i].x, sd.outer[i].y);
+    shape.moveTo(outer[0].x, outer[0].y);
+    for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i].x, outer[i].y);
     shape.closePath();
     for (const hole of sd.holes) {
-      if (hole.length < 3) continue;
+      const h = simplifyContour(hole, SIMPLIFY_TOLERANCE);
+      if (h.length < 3) continue;
       const path = new Path();
-      path.moveTo(hole[0].x, hole[0].y);
-      for (let i = 1; i < hole.length; i++) path.lineTo(hole[i].x, hole[i].y);
+      path.moveTo(h[0].x, h[0].y);
+      for (let i = 1; i < h.length; i++) path.lineTo(h[i].x, h[i].y);
       shape.holes.push(path);
     }
     return shape;
-  });
+  }).filter((s): s is Shape => s !== null);
 }
 
 function serializeGeo(
