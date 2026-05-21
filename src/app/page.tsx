@@ -90,7 +90,7 @@ export default function Home() {
         pipelineStage={pipeline.pipelineStage}
       />
 
-      <div className="p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 sm:gap-6">
+      <div className="p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-4 sm:gap-6">
         <section className="order-2 lg:order-1">
           <StampPreview settings={pipeline.effectiveSettings} shapes={pipeline.shapes} exportName={exportName} thinFeatureMap={pipeline.thinFeatureMap} />
         </section>

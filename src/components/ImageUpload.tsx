@@ -282,10 +282,10 @@ export default function ImageUpload({
               <img
                 src={imageDataUrl ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText!)}`}
                 alt="Original"
-                className="max-h-80 max-w-[48%] object-contain cursor-crosshair"
+                className="max-h-96 max-w-[48%] object-contain cursor-crosshair"
                 onClick={samplePixel}
               />
-              <canvas ref={canvasRef} className="max-h-80 max-w-[48%]" />
+              <canvas ref={canvasRef} className="max-h-96 max-w-[48%]" />
             </div>
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-white/70">
