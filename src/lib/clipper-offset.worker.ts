@@ -204,7 +204,6 @@ function thickenShapeClipper(
   let newOuter = shape.outer;
   const newHoles: Point[][] = [];
 
-  // Expand thin outer contours outward
   const outerPath = toClipperPath(shape.outer);
   const outerMetrics = computePathMetrics(outerPath);
 
@@ -218,17 +217,45 @@ function thickenShapeClipper(
 
       const survived = expanded.filter((p) => Math.abs(ClipperLib.Clipper.Area(p)) > MIN_AREA_SQ);
       if (survived.length > 0) {
-        let largest = survived[0];
-        let largestArea = Math.abs(ClipperLib.Clipper.Area(survived[0]));
-        for (let i = 1; i < survived.length; i++) {
-          const a = Math.abs(ClipperLib.Clipper.Area(survived[i]));
-          if (a > largestArea) { largest = survived[i]; largestArea = a; }
+        const outerPaths: ClipperLib.Paths = [];
+        for (const p of survived) {
+          if (ClipperLib.Clipper.Area(p) > 0) {
+            outerPaths.push(p);
+          } else {
+            newHoles.push(simplifyContour(fromClipperPath(p), SIMPLIFY_TOLERANCE));
+          }
         }
-        if (ClipperLib.Clipper.Area(largest) < 0) {
-          largest.reverse();
+
+        let merged: ClipperLib.Paths;
+        if (outerPaths.length > 1) {
+          const clipper = new ClipperLib.Clipper();
+          for (const p of outerPaths) {
+            clipper.AddPath(p, ClipperLib.PolyType.ptSubject, true);
+          }
+          merged = [];
+          clipper.Execute(
+            ClipperLib.ClipType.ctUnion, merged,
+            ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero
+          );
+        } else {
+          merged = outerPaths;
         }
-        newOuter = simplifyContour(fromClipperPath(largest), SIMPLIFY_TOLERANCE);
-        modified = true;
+
+        let largest: ClipperLib.Path | null = null;
+        let largestArea = 0;
+        for (const p of merged) {
+          const area = ClipperLib.Clipper.Area(p);
+          if (area > MIN_AREA_SQ && area > largestArea) {
+            largest = p;
+            largestArea = area;
+          } else if (area < -MIN_AREA_SQ) {
+            newHoles.push(simplifyContour(fromClipperPath(p), SIMPLIFY_TOLERANCE));
+          }
+        }
+        if (largest) {
+          newOuter = simplifyContour(fromClipperPath(largest), SIMPLIFY_TOLERANCE);
+          modified = true;
+        }
       }
     }
   }
