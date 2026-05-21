@@ -106,8 +106,6 @@ export default function Home() {
             progressStage={pipeline.traceStage}
             threshold={settings.threshold}
             onThresholdChange={(v) => setSettings((s) => ({ ...s, threshold: v }))}
-            tracerAlgorithm={tracerAlgorithm}
-            onTracerChange={setTracerAlgorithm}
           />
           <TextEditor
             texts={texts}
@@ -126,6 +124,9 @@ export default function Home() {
             onSmoothToggle={() => setSmoothEnabled((v) => !v)}
             thickenAlgorithm={thickenAlgorithm}
             onThickenAlgorithmChange={setThickenAlgorithm}
+            tracerAlgorithm={tracerAlgorithm}
+            onTracerChange={setTracerAlgorithm}
+            hasImage={!!(imageDataUrl || svgText)}
           />
         </aside>
       </div>

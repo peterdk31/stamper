@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useRef, useEffect } from "react";
-import { TRACERS } from "@/lib/pipeline/registry";
 
 interface Props {
   imageDataUrl: string | null;
@@ -13,8 +12,6 @@ interface Props {
   progressStage?: string;
   threshold?: number;
   onThresholdChange?: (value: number) => void;
-  tracerAlgorithm?: string;
-  onTracerChange?: (id: string) => void;
 }
 
 export default function ImageUpload({
@@ -22,7 +19,6 @@ export default function ImageUpload({
   onImageChange, onSvgChange,
   isProcessing, progress = 0, progressStage = "",
   threshold = 128, onThresholdChange,
-  tracerAlgorithm, onTracerChange,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -230,25 +226,6 @@ export default function ImageUpload({
         </div>
       )}
 
-      {(imageDataUrl || svgText) && TRACERS.length > 1 && onTracerChange && (
-        <div className="flex items-center gap-1">
-          <span className="text-sm font-medium text-gray-700 mr-2">Tracer</span>
-          {TRACERS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => onTracerChange(t.id)}
-              title={t.description}
-              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                tracerAlgorithm === t.id
-                  ? "bg-amber-700 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
