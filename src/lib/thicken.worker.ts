@@ -476,9 +476,6 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled, smoothEnabled } = e.data;
   const post = self.postMessage.bind(self);
 
-  const imageShapes = shapes.filter((s) => s.source !== "text");
-  const textShapes = shapes.filter((s) => s.source === "text");
-
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);
 
   const border = Math.ceil(Math.max(nozzleDiameter / 2, GAP_CLOSE_FACTOR * nozzleDiameter) / RESOLUTION) + 2;
@@ -490,32 +487,23 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const tctx = tmp.getContext("2d")!;
 
   const shapeMasks: Uint8Array[] = [];
-  const imageMask = new Uint8Array(n);
-  for (const shape of imageShapes) {
+  const allMask = new Uint8Array(n);
+  for (const shape of shapes) {
     const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
     shapeMasks.push(sm);
     for (let i = 0; i < n; i++) {
-      if (sm[i]) imageMask[i] = 1;
+      if (sm[i]) allMask[i] = 1;
     }
   }
 
   const closeRadiusPx = GAP_CLOSE_FACTOR * nozzleDiameter / RESOLUTION;
   const closeRadiusSq = closeRadiusPx * closeRadiusPx;
-  let closedImageMask: Uint8Array;
-  if (imageShapes.length > 0 && closeRadiusPx >= 1) {
+  let mask: Uint8Array;
+  if (shapes.length > 0 && closeRadiusPx >= 1) {
     post({ type: "progress", progress: 0.05, stage: "Bridging micro-gaps…" } as ThickenMessage);
-    closedImageMask = morphologicalClose(imageMask, gridW, gridH, closeRadiusSq);
+    mask = morphologicalClose(allMask, gridW, gridH, closeRadiusSq);
   } else {
-    closedImageMask = imageMask;
-  }
-
-  const mask = new Uint8Array(closedImageMask);
-  const textMask = new Uint8Array(n);
-  for (const shape of textShapes) {
-    const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
-    for (let i = 0; i < n; i++) {
-      if (sm[i]) { mask[i] = 1; textMask[i] = 1; }
-    }
+    mask = allMask;
   }
 
   post({ type: "progress", progress: 0.15, stage: "Computing distance fields…" } as ThickenMessage);
@@ -537,7 +525,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     for (let y = 0; y < gridH; y++) {
       for (let x = 0; x < gridW; x++) {
         const i = y * gridW + x;
-        if (!thin[i] || textMask[i]) continue;
+        if (!thin[i]) continue;
 
         const val = sqDistToBg[i];
         let isMax = true;
@@ -557,7 +545,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     if (hasSkeleton) skeleton = skel;
   }
 
-  // Group shapes via connected-component labeling on closedImageMask.
+  // Group shapes via connected-component labeling on mask.
   // Shapes bridged by the morphological close end up in the same component.
   post({ type: "progress", progress: 0.5, stage: "Analyzing shape groups…" } as ThickenMessage);
 
@@ -575,13 +563,13 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   for (let y = 0; y < gridH; y++) {
     for (let x = 0; x < gridW; x++) {
       const i = y * gridW + x;
-      if (!closedImageMask[i]) continue;
-      if (x + 1 < gridW && closedImageMask[i + 1]) ccUnion(i, i + 1);
-      if (y + 1 < gridH && closedImageMask[i + gridW]) ccUnion(i, i + gridW);
+      if (!mask[i]) continue;
+      if (x + 1 < gridW && mask[i + 1]) ccUnion(i, i + 1);
+      if (y + 1 < gridH && mask[i + gridW]) ccUnion(i, i + gridW);
     }
   }
 
-  const shapeToComp = new Array<number>(imageShapes.length);
+  const shapeToComp = new Array<number>(shapes.length);
   for (let si = 0; si < shapeMasks.length; si++) {
     shapeToComp[si] = -1;
     const sm = shapeMasks[si];
@@ -591,7 +579,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   }
 
   const groups = new Map<number, number[]>();
-  for (let si = 0; si < imageShapes.length; si++) {
+  for (let si = 0; si < shapes.length; si++) {
     const comp = shapeToComp[si] >= 0 ? shapeToComp[si] : -(si + 1);
     if (!groups.has(comp)) groups.set(comp, []);
     groups.get(comp)!.push(si);
@@ -606,9 +594,9 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     let hasNewPixels = false;
     if (compKey >= 0) {
       for (let i = 0; i < n; i++) {
-        if (closedImageMask[i] && ccFind(i) === compKey) {
+        if (mask[i] && ccFind(i) === compKey) {
           groupMask[i] = 1;
-          if (!imageMask[i]) hasNewPixels = true;
+          if (!allMask[i]) hasNewPixels = true;
         }
       }
     } else {
@@ -632,14 +620,14 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
         const otherMask = new Uint8Array(n);
         let hasOther = false;
         for (let i = 0; i < n; i++) {
-          if (closedImageMask[i] && !groupMask[i]) { otherMask[i] = 1; hasOther = true; }
+          if (mask[i] && !groupMask[i]) { otherMask[i] = 1; hasOther = true; }
         }
         const sqDistToOther = hasOther
           ? squaredEDT(initEDT(otherMask, n, true), gridW, gridH)
           : null;
 
         for (let i = 0; i < n; i++) {
-          if (!groupMask[i] && !textMask[i] && sqDist[i] <= radiusSq) {
+          if (!groupMask[i] && sqDist[i] <= radiusSq) {
             if (!sqDistToOther || sqDistToOther[i] > radiusSq) {
               groupMask[i] = 1;
               groupThickened = true;
@@ -656,14 +644,14 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
         ...traceAndSimplify(groupMask, gridW, gridH, stampHeight, smoothEnabled, border),
       );
     } else {
-      mergedImageShapes.push(imageShapes[members[0]]);
+      mergedImageShapes.push(shapes[members[0]]);
     }
   }
 
   let resultShapes: ShapeData[];
   let shapesModified: boolean;
   if (anyMerge) {
-    resultShapes = [...mergedImageShapes, ...textShapes];
+    resultShapes = mergedImageShapes;
     shapesModified = true;
   } else {
     resultShapes = [];
@@ -672,9 +660,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
   post({ type: "progress", progress: 0.8, stage: "Detecting thin features…" } as ThickenMessage);
   const thinFeatureMap = anyThicken
-    ? (textShapes.length > 0
-        ? buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border, textMask)
-        : emptyThinFeatureMap(stampWidth, stampHeight))
+    ? emptyThinFeatureMap(stampWidth, stampHeight)
     : buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border);
 
   if (!shapesModified) {

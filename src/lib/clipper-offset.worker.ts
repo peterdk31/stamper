@@ -279,9 +279,6 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled, smoothEnabled: _smoothEnabled } = e.data;
   const post = self.postMessage.bind(self);
 
-  const imageShapes = shapes.filter((s) => s.source !== "text");
-  const textShapes = shapes.filter((s) => s.source === "text");
-
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);
 
   const border = Math.ceil(Math.max(nozzleDiameter / 2, GAP_CLOSE_FACTOR * nozzleDiameter) / RASTER_RESOLUTION) + 2;
@@ -292,40 +289,31 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const tmp = new OffscreenCanvas(gridW, gridH);
   const tctx = tmp.getContext("2d")!;
 
-  const imageMask = new Uint8Array(n);
-  for (const shape of imageShapes) {
+  const allMask = new Uint8Array(n);
+  for (const shape of shapes) {
     const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
     for (let i = 0; i < n; i++) {
-      if (sm[i]) imageMask[i] = 1;
+      if (sm[i]) allMask[i] = 1;
     }
   }
 
   const closeRadiusPx = GAP_CLOSE_FACTOR * nozzleDiameter / RASTER_RESOLUTION;
   const closeRadiusSq = closeRadiusPx * closeRadiusPx;
-  let closedImageMask: Uint8Array;
-  if (imageShapes.length > 0 && closeRadiusPx >= 1) {
+  let mask: Uint8Array;
+  if (shapes.length > 0 && closeRadiusPx >= 1) {
     post({ type: "progress", progress: 0.05, stage: "Bridging micro-gaps…" } as ThickenMessage);
-    closedImageMask = morphologicalClose(imageMask, gridW, gridH, closeRadiusSq);
+    mask = morphologicalClose(allMask, gridW, gridH, closeRadiusSq);
   } else {
-    closedImageMask = imageMask;
-  }
-
-  const mask = new Uint8Array(closedImageMask);
-  const textMask = new Uint8Array(n);
-  for (const shape of textShapes) {
-    const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
-    for (let i = 0; i < n; i++) {
-      if (sm[i]) { mask[i] = 1; textMask[i] = 1; }
-    }
+    mask = allMask;
   }
 
   post({ type: "progress", progress: 0.15, stage: "Computing distance fields…" } as ThickenMessage);
   const sqDistToBg = squaredEDT(initEDT(mask, n, false), gridW, gridH);
 
   let anyThickened = false;
-  let resultImageShapes: ShapeData[] = imageShapes;
+  let resultShapes: ShapeData[] = shapes;
 
-  if (thickenEnabled && imageShapes.length > 0) {
+  if (thickenEnabled && shapes.length > 0) {
     post({ type: "progress", progress: 0.25, stage: "Finding thin features…" } as ThickenMessage);
 
     const radiusPx = nozzleDiameter / 2 / RASTER_RESOLUTION;
@@ -334,15 +322,14 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
 
     let hasThin = false;
     for (let i = 0; i < n; i++) {
-      if (thin[i] && !textMask[i]) { hasThin = true; break; }
+      if (thin[i]) { hasThin = true; break; }
     }
 
     if (hasThin) {
       post({ type: "progress", progress: 0.4, stage: "Thickening via Clipper offset…" } as ThickenMessage);
 
-      // Determine which shapes have thin features by checking their rasterized masks
       const shapesWithThin: boolean[] = [];
-      for (const shape of imageShapes) {
+      for (const shape of shapes) {
         const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
         let shapeHasThin = false;
         for (let i = 0; i < n; i++) {
@@ -352,25 +339,25 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
       }
 
       const thickened: ShapeData[] = [];
-      for (let si = 0; si < imageShapes.length; si++) {
+      for (let si = 0; si < shapes.length; si++) {
         if (shapesWithThin[si]) {
-          const result = thickenShapeClipper(imageShapes[si], nozzleDiameter);
+          const result = thickenShapeClipper(shapes[si], nozzleDiameter);
           if (result) {
             thickened.push(result);
             anyThickened = true;
           } else {
-            thickened.push(imageShapes[si]);
+            thickened.push(shapes[si]);
           }
         } else {
-          thickened.push(imageShapes[si]);
+          thickened.push(shapes[si]);
         }
         if (si % 5 === 0) {
-          post({ type: "progress", progress: 0.4 + 0.35 * (si / imageShapes.length), stage: "Thickening via Clipper offset…" } as ThickenMessage);
+          post({ type: "progress", progress: 0.4 + 0.35 * (si / shapes.length), stage: "Thickening via Clipper offset…" } as ThickenMessage);
         }
       }
 
       if (anyThickened) {
-        resultImageShapes = thickened;
+        resultShapes = thickened;
       }
     }
   }
@@ -378,15 +365,11 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   post({ type: "progress", progress: 0.8, stage: "Detecting thin features…" } as ThickenMessage);
 
   const thinFeatureMap = anyThickened
-    ? (textShapes.length > 0
-        ? buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border, textMask)
-        : emptyThinFeatureMap(stampWidth, stampHeight))
+    ? emptyThinFeatureMap(stampWidth, stampHeight)
     : buildThinFeatureMap(mask, sqDistToBg, gridW, gridH, stampWidth, stampHeight, nozzleDiameter, border);
 
   const shapesModified = anyThickened;
-  const resultShapes = shapesModified
-    ? [...resultImageShapes, ...textShapes]
-    : [];
+  const finalShapes = shapesModified ? resultShapes : [];
 
   if (!shapesModified) {
     post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
@@ -400,7 +383,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   }
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const s of resultShapes) {
+  for (const s of finalShapes) {
     for (const p of s.outer) {
       if (p.x < minX) minX = p.x;
       if (p.y < minY) minY = p.y;
@@ -415,7 +398,7 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   post({ type: "progress", progress: 1.0, stage: "Done" } as ThickenMessage);
   const result: ThickenMessage = {
     type: "result", shapesModified: true,
-    shapes: resultShapes, bounds,
+    shapes: finalShapes, bounds,
     thinFeatureMap,
   };
   self.postMessage(result, { transfer: [thinFeatureMap.pixels.buffer] } as unknown as StructuredSerializeOptions);
