@@ -22,8 +22,8 @@ export default function Home() {
   const [fontsReady, setFontsReady] = useState(false);
   const [thickenEnabled, setThickenEnabled] = useState(true);
   const [smoothEnabled, setSmoothEnabled] = useState(true);
-  const [tracerAlgorithm, setTracerAlgorithm] = useState("marching-squares");
-  const [thickenAlgorithm, setThickenAlgorithm] = useState("edt");
+  const [tracerAlgorithm, setTracerAlgorithm] = useState("potrace");
+  const [thickenAlgorithm, setThickenAlgorithm] = useState("clipper");
 
   useEffect(() => {
     loadAllBundledFonts().then((entries) => {

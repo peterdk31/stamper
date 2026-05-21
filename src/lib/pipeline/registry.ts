@@ -7,8 +7,8 @@ import { clipperThickenStep } from "./thicken-clipper";
 import { smoothStep } from "./smooth";
 
 export const TRACERS: TracerDefinition[] = [
-  marchingSquaresTracer,
   potraceTracer,
+  marchingSquaresTracer,
 ];
 
 export const STEP_SLOTS: StepSlot[] = [
@@ -23,10 +23,10 @@ export const STEP_SLOTS: StepSlot[] = [
   {
     id: "thicken",
     label: "Thickening",
-    defaultId: "edt",
+    defaultId: "clipper",
     variants: [
-      { id: "edt", label: "EDT", description: "Distance-transform raster thickening", step: thickenStep },
       { id: "clipper", label: "Clipper", description: "Vector polygon offset thickening", step: clipperThickenStep },
+      { id: "edt", label: "EDT", description: "Distance-transform raster thickening", step: thickenStep },
     ],
   },
 ];
