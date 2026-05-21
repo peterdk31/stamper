@@ -1,11 +1,10 @@
-import type { StampShapeData } from "@/types/stamp";
+import type { StampShapeData, ColorMask } from "@/types/stamp";
 
 export interface ImageAdjustments {
   threshold: number;
   brightness: number;
   contrast: number;
-  colorMasks: number[];
-  colorMaskTolerance: number;
+  colorMasks: ColorMask[];
   invert: boolean;
 }
 

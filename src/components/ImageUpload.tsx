@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import type { ColorMask } from "@/types/stamp";
+import ColorPickerModal from "./ColorPickerModal";
 
 interface Props {
   imageDataUrl: string | null;
@@ -16,10 +18,8 @@ interface Props {
   onBrightnessChange?: (value: number) => void;
   contrast?: number;
   onContrastChange?: (value: number) => void;
-  colorMasks?: number[];
-  onColorMasksChange?: (value: number[]) => void;
-  colorMaskTolerance?: number;
-  onColorMaskToleranceChange?: (value: number) => void;
+  colorMasks?: ColorMask[];
+  onColorMasksChange?: (value: ColorMask[]) => void;
   invert?: boolean;
   onInvertChange?: (value: boolean) => void;
 }
@@ -28,8 +28,7 @@ interface LocalAdj {
   threshold: number;
   brightness: number;
   contrast: number;
-  colorMasks: number[];
-  colorMaskTolerance: number;
+  colorMasks: ColorMask[];
   invert: boolean;
 }
 
@@ -40,26 +39,31 @@ function adjustPixel(value: number, brightness: number, contrastFactor: number, 
   return value < 0 ? 0 : value > 255 ? 255 : value;
 }
 
-function rgbHue(r: number, g: number, b: number): number {
-  const max = r > g ? (r > b ? r : b) : (g > b ? g : b);
-  const min = r < g ? (r < b ? r : b) : (g < b ? g : b);
-  const delta = max - min;
-  if (delta === 0) return 0;
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const r1 = r / 255, g1 = g / 255, b1 = b / 255;
+  const max = Math.max(r1, g1, b1), min = Math.min(r1, g1, b1);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l * 100];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
   let h: number;
-  if (max === r) h = ((g - b) / delta) % 6;
-  else if (max === g) h = (b - r) / delta + 2;
-  else h = (r - g) / delta + 4;
-  h *= 60;
-  if (h < 0) h += 360;
-  return h;
+  if (max === r1) h = ((g1 - b1) / d + (g1 < b1 ? 6 : 0)) * 60;
+  else if (max === g1) h = ((b1 - r1) / d + 2) * 60;
+  else h = ((r1 - g1) / d + 4) * 60;
+  return [h, s * 100, l * 100];
 }
 
-function isColorMasked(r: number, g: number, b: number, masks: number[], tolerance: number): boolean {
+function hslDist(h1: number, s1: number, l1: number, h2: number, s2: number, l2: number): number {
+  const dh = Math.abs(h1 - h2);
+  const hd = (dh > 180 ? 360 - dh : dh) * (100 / 180);
+  return Math.sqrt(hd * hd + (s1 - s2) * (s1 - s2) + (l1 - l2) * (l1 - l2));
+}
+
+function isColorMasked(r: number, g: number, b: number, masks: ColorMask[]): boolean {
   if (masks.length === 0) return false;
-  const h = rgbHue(r, g, b);
+  const [h, s, l] = rgbToHsl(r, g, b);
   for (let i = 0; i < masks.length; i++) {
-    const d = Math.abs(h - masks[i]);
-    if ((d > 180 ? 360 - d : d) <= tolerance) return true;
+    if (hslDist(h, s, l, masks[i].hue, masks[i].saturation, masks[i].lightness) <= masks[i].tolerance) return true;
   }
   return false;
 }
@@ -72,19 +76,19 @@ export default function ImageUpload({
   brightness = 0, onBrightnessChange,
   contrast = 0, onContrastChange,
   colorMasks = [], onColorMasksChange,
-  colorMaskTolerance = 30, onColorMaskToleranceChange,
   invert = false, onInvertChange,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pixelCacheRef = useRef<ImageData | null>(null);
   const isDraggingRef = useRef(false);
-  const localRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert });
-  const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert });
+  const localRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, invert });
+  const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, invert });
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
-    propsRef.current = { threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert };
-  }, [threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert]);
+    propsRef.current = { threshold, brightness, contrast, colorMasks, invert };
+  }, [threshold, brightness, contrast, colorMasks, invert]);
 
   const thresholdLabelRef = useRef<HTMLSpanElement>(null);
   const thresholdSliderRef = useRef<HTMLInputElement>(null);
@@ -92,8 +96,7 @@ export default function ImageUpload({
   const brightnessSliderRef = useRef<HTMLInputElement>(null);
   const contrastLabelRef = useRef<HTMLSpanElement>(null);
   const contrastSliderRef = useRef<HTMLInputElement>(null);
-  const toleranceLabelRef = useRef<HTMLSpanElement>(null);
-  const toleranceSliderRef = useRef<HTMLInputElement>(null);
+
 
   const [adjustOpen, setAdjustOpen] = useState(false);
 
@@ -114,7 +117,7 @@ export default function ImageUpload({
     const hasMasks = adj.colorMasks.length > 0;
     for (let i = 0; i < src.length; i += 4) {
       const r0 = src[i], g0 = src[i + 1], b0 = src[i + 2];
-      if (hasMasks && isColorMasked(r0, g0, b0, adj.colorMasks, adj.colorMaskTolerance)) {
+      if (hasMasks && isColorMasked(r0, g0, b0, adj.colorMasks)) {
         dst[i] = dst[i + 1] = dst[i + 2] = 255;
         dst[i + 3] = 255;
         continue;
@@ -134,7 +137,6 @@ export default function ImageUpload({
     if (thresholdLabelRef.current) thresholdLabelRef.current.textContent = String(adj.threshold);
     if (brightnessLabelRef.current) brightnessLabelRef.current.textContent = String(adj.brightness);
     if (contrastLabelRef.current) contrastLabelRef.current.textContent = String(adj.contrast);
-    if (toleranceLabelRef.current) toleranceLabelRef.current.textContent = adj.colorMaskTolerance + "°";
   }
 
   useEffect(() => {
@@ -161,14 +163,13 @@ export default function ImageUpload({
 
   useEffect(() => {
     if (!isDraggingRef.current) {
-      const adj = { threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert };
+      const adj = { threshold, brightness, contrast, colorMasks, invert };
       drawPreview(adj);
       if (thresholdSliderRef.current) thresholdSliderRef.current.value = String(threshold);
       if (brightnessSliderRef.current) brightnessSliderRef.current.value = String(brightness);
       if (contrastSliderRef.current) contrastSliderRef.current.value = String(contrast);
-      if (toleranceSliderRef.current) toleranceSliderRef.current.value = String(colorMaskTolerance);
     }
-  }, [threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert]);
+  }, [threshold, brightness, contrast, colorMasks, invert]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -215,53 +216,14 @@ export default function ImageUpload({
     drawPreview(localRef.current);
   }
 
-  function samplePixel(e: React.MouseEvent<HTMLImageElement>) {
-    e.stopPropagation();
-    const img = e.currentTarget;
-    const rect = img.getBoundingClientRect();
-    const srcData = pixelCacheRef.current;
-    if (!srcData) return;
-
-    const elemAspect = rect.width / rect.height;
-    const imgAspect = srcData.width / srcData.height;
-    let renderW: number, renderH: number, offsetX: number, offsetY: number;
-    if (imgAspect > elemAspect) {
-      renderW = rect.width;
-      renderH = rect.width / imgAspect;
-      offsetX = 0;
-      offsetY = (rect.height - renderH) / 2;
-    } else {
-      renderH = rect.height;
-      renderW = rect.height * imgAspect;
-      offsetX = (rect.width - renderW) / 2;
-      offsetY = 0;
-    }
-
-    const clickX = e.clientX - rect.left - offsetX;
-    const clickY = e.clientY - rect.top - offsetY;
-    if (clickX < 0 || clickY < 0 || clickX >= renderW || clickY >= renderH) return;
-
-    const pixelX = Math.floor((clickX / renderW) * srcData.width);
-    const pixelY = Math.floor((clickY / renderH) * srcData.height);
-    const idx = (pixelY * srcData.width + pixelX) * 4;
-    const r = srcData.data[idx], g = srcData.data[idx + 1], b = srcData.data[idx + 2];
-
-    const hue = rgbHue(r, g, b);
-
-    const current = propsRef.current.colorMasks;
-    const tol = propsRef.current.colorMaskTolerance;
-    const alreadyCovered = current.some((h) => {
-      const d = Math.abs(h - hue);
-      return (d > 180 ? 360 - d : d) <= tol;
-    });
-    if (!alreadyCovered) onColorMasksChange?.([...current, hue]);
-  }
-
   const hasContent = imageDataUrl || svgText;
   const showRasterControls = hasContent && onThresholdChange;
   const hasAdjustments = threshold !== 128 || brightness !== 0 || contrast !== 0 || colorMasks.length > 0 || invert;
 
+  const imageSourceForModal = imageDataUrl ?? (svgText ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}` : null);
+
   return (
+    <>
     <div className="p-4 bg-white rounded-lg shadow space-y-3">
       <h2 className="text-lg font-semibold">Outline Image</h2>
 
@@ -282,8 +244,7 @@ export default function ImageUpload({
               <img
                 src={imageDataUrl ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText!)}`}
                 alt="Original"
-                className="max-h-96 max-w-[48%] object-contain cursor-crosshair"
-                onClick={samplePixel}
+                className="max-h-96 max-w-[48%] object-contain"
               />
               <canvas ref={canvasRef} className="max-h-96 max-w-[48%]" />
             </div>
@@ -358,7 +319,6 @@ export default function ImageUpload({
                     onBrightnessChange?.(0);
                     onContrastChange?.(0);
                     onColorMasksChange?.([]);
-                    onColorMaskToleranceChange?.(30);
                     onInvertChange?.(false);
                   }}
                   className="text-xs text-amber-600 hover:text-amber-800"
@@ -442,48 +402,27 @@ export default function ImageUpload({
                 />
               </div>
               <div className="pt-1 border-t border-gray-200">
-                <p className="text-xs text-gray-500 mb-1">Click the original image to sample a color to remove</p>
-                {colorMasks.length > 0 && (
-                  <>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {colorMasks.map((hue, i) => (
-                        <button
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="text-sm text-amber-600 hover:text-amber-800"
+                  >
+                    Pick colors to remove
+                  </button>
+                  {colorMasks.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {colorMasks.map((mask, i) => (
+                        <div
                           key={i}
-                          type="button"
-                          onClick={() => onColorMasksChange?.(colorMasks.filter((_, j) => j !== i))}
-                          title="Click to remove"
-                          className="w-6 h-6 rounded-full border border-gray-300 hover:border-red-400 hover:scale-110 transition-all"
-                          style={{ backgroundColor: `hsl(${hue}, 70%, 50%)` }}
+                          className="w-5 h-5 rounded-full border border-gray-300"
+                          style={{ backgroundColor: `hsl(${mask.hue}, ${mask.saturation}%, ${mask.lightness}%)` }}
+                          title={`${Math.round(mask.hue)}° ±${mask.tolerance}`}
                         />
                       ))}
                     </div>
-                    <div className="mt-2 space-y-1">
-                      <div className="flex justify-between text-sm text-gray-600">
-                        <span>Tolerance</span>
-                        <span ref={toleranceLabelRef}>{colorMaskTolerance}&deg;</span>
-                      </div>
-                      <input
-                        ref={toleranceSliderRef}
-                        type="range"
-                        min={5}
-                        max={90}
-                        defaultValue={colorMaskTolerance}
-                        onPointerDown={startDrag}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          localRef.current.colorMaskTolerance = v;
-                          redrawLocal();
-                          if (!isDraggingRef.current) onColorMaskToleranceChange?.(v);
-                        }}
-                        onPointerUp={() => {
-                          isDraggingRef.current = false;
-                          onColorMaskToleranceChange?.(localRef.current.colorMaskTolerance);
-                        }}
-                        className="w-full accent-amber-500"
-                      />
-                    </div>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
                 <input
@@ -499,5 +438,18 @@ export default function ImageUpload({
         </div>
       )}
     </div>
+    {pickerOpen && imageSourceForModal && onColorMasksChange && (
+      <ColorPickerModal
+        imageSource={imageSourceForModal}
+        colorMasks={colorMasks}
+        onColorMasksChange={onColorMasksChange}
+        onClose={() => setPickerOpen(false)}
+        threshold={threshold}
+        brightness={brightness}
+        contrast={contrast}
+        invert={invert}
+      />
+    )}
+    </>
   );
 }

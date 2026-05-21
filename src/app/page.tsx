@@ -112,8 +112,6 @@ export default function Home() {
             onContrastChange={(v) => setSettings((s) => ({ ...s, contrast: v }))}
             colorMasks={settings.colorMasks}
             onColorMasksChange={(v) => setSettings((s) => ({ ...s, colorMasks: v }))}
-            colorMaskTolerance={settings.colorMaskTolerance}
-            onColorMaskToleranceChange={(v) => setSettings((s) => ({ ...s, colorMaskTolerance: v }))}
             invert={settings.invert}
             onInvertChange={(v) => setSettings((s) => ({ ...s, invert: v }))}
           />

@@ -14,6 +14,8 @@ export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
   segments: 48,
 };
 
+export interface ColorMask { hue: number; saturation: number; lightness: number; tolerance: number }
+
 export type FitDimension = "width" | "height" | "off";
 
 export interface StampSettings {
@@ -28,8 +30,7 @@ export interface StampSettings {
   threshold: number; // 0–255, luminance cutoff for black/white conversion
   brightness: number; // -100..100, applied before threshold
   contrast: number; // -100..100, applied before threshold
-  colorMasks: number[]; // active hue centers in degrees (0-360) to remove
-  colorMaskTolerance: number; // ± degrees from center hue (5-90)
+  colorMasks: ColorMask[];
   invert: boolean; // flip dark/light before threshold
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
   threadEnabled: boolean;
@@ -49,7 +50,6 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   brightness: 0,
   contrast: 0,
   colorMasks: [],
-  colorMaskTolerance: 30,
   invert: false,
   nozzleDiameter: 0.4,
   threadEnabled: true,

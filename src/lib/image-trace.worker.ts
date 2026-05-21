@@ -110,13 +110,14 @@ function nestContours(contours: Point[][]): ShapeData[] {
   return shapes;
 }
 
+interface ColorMask { hue: number; saturation: number; lightness: number; tolerance: number }
+
 export interface TraceRequest {
   bitmap: ImageBitmap;
   threshold: number;
   brightness: number;
   contrast: number;
-  colorMasks: number[];
-  colorMaskTolerance: number;
+  colorMasks: ColorMask[];
   invert: boolean;
 }
 
@@ -265,32 +266,37 @@ function adjustPixel(value: number, brightness: number, contrastFactor: number, 
   return value < 0 ? 0 : value > 255 ? 255 : value;
 }
 
-function rgbHue(r: number, g: number, b: number): number {
-  const max = r > g ? (r > b ? r : b) : (g > b ? g : b);
-  const min = r < g ? (r < b ? r : b) : (g < b ? g : b);
-  const delta = max - min;
-  if (delta === 0) return 0;
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const r1 = r / 255, g1 = g / 255, b1 = b / 255;
+  const max = Math.max(r1, g1, b1), min = Math.min(r1, g1, b1);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l * 100];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
   let h: number;
-  if (max === r) h = ((g - b) / delta) % 6;
-  else if (max === g) h = (b - r) / delta + 2;
-  else h = (r - g) / delta + 4;
-  h *= 60;
-  if (h < 0) h += 360;
-  return h;
+  if (max === r1) h = ((g1 - b1) / d + (g1 < b1 ? 6 : 0)) * 60;
+  else if (max === g1) h = ((b1 - r1) / d + 2) * 60;
+  else h = ((r1 - g1) / d + 4) * 60;
+  return [h, s * 100, l * 100];
 }
 
-function isColorMasked(r: number, g: number, b: number, masks: number[], tolerance: number): boolean {
+function hslDist(h1: number, s1: number, l1: number, h2: number, s2: number, l2: number): number {
+  const dh = Math.abs(h1 - h2);
+  const hd = (dh > 180 ? 360 - dh : dh) * (100 / 180);
+  return Math.sqrt(hd * hd + (s1 - s2) * (s1 - s2) + (l1 - l2) * (l1 - l2));
+}
+
+function isColorMasked(r: number, g: number, b: number, masks: ColorMask[]): boolean {
   if (masks.length === 0) return false;
-  const h = rgbHue(r, g, b);
+  const [h, s, l] = rgbToHsl(r, g, b);
   for (let i = 0; i < masks.length; i++) {
-    const d = Math.abs(h - masks[i]);
-    if ((d > 180 ? 360 - d : d) <= tolerance) return true;
+    if (hslDist(h, s, l, masks[i].hue, masks[i].saturation, masks[i].lightness) <= masks[i].tolerance) return true;
   }
   return false;
 }
 
 self.onmessage = (e: MessageEvent<TraceRequest>) => {
-  const { bitmap, threshold, brightness = 0, contrast = 0, colorMasks = [], colorMaskTolerance = 30, invert = false } = e.data;
+  const { bitmap, threshold, brightness = 0, contrast = 0, colorMasks = [], invert = false } = e.data;
 
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
   const ctx = canvas.getContext("2d")!;
@@ -326,7 +332,7 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
       const off = dataRowStart + x * 4;
       const r0 = data[off], g0 = data[off + 1], b0 = data[off + 2];
       if (data[off + 3] <= 128) { grid[rowStart + x] = 0; continue; }
-      if (hasMasks && isColorMasked(r0, g0, b0, colorMasks, colorMaskTolerance)) {
+      if (hasMasks && isColorMasked(r0, g0, b0, colorMasks)) {
         grid[rowStart + x] = 0;
         continue;
       }

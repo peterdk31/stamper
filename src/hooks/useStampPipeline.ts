@@ -307,9 +307,8 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     brightness: settings.brightness,
     contrast: settings.contrast,
     colorMasks: settings.colorMasks,
-    colorMaskTolerance: settings.colorMaskTolerance,
     invert: settings.invert,
-  }), [settings.threshold, settings.brightness, settings.contrast, settings.colorMasks, settings.colorMaskTolerance, settings.invert]);
+  }), [settings.threshold, settings.brightness, settings.contrast, settings.colorMasks, settings.invert]);
   const trace = useImageTrace(tracer, imageDataUrl, svgText, adjustments);
 
   const hasImage = !!(trace.rawShapes && trace.rawImageDims);
