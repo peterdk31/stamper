@@ -4,9 +4,8 @@ export interface ImageAdjustments {
   threshold: number;
   brightness: number;
   contrast: number;
-  redWeight: number;
-  greenWeight: number;
-  blueWeight: number;
+  colorMasks: number[];
+  colorMaskTolerance: number;
   invert: boolean;
 }
 

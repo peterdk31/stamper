@@ -28,9 +28,8 @@ export interface StampSettings {
   threshold: number; // 0–255, luminance cutoff for black/white conversion
   brightness: number; // -100..100, applied before threshold
   contrast: number; // -100..100, applied before threshold
-  redWeight: number; // 0–100, channel contribution to grayscale
-  greenWeight: number;
-  blueWeight: number;
+  colorMasks: number[]; // active hue centers in degrees (0-360) to remove
+  colorMaskTolerance: number; // ± degrees from center hue (5-90)
   invert: boolean; // flip dark/light before threshold
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
   threadEnabled: boolean;
@@ -49,14 +48,23 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   threshold: 128,
   brightness: 0,
   contrast: 0,
-  redWeight: 30,
-  greenWeight: 59,
-  blueWeight: 11,
+  colorMasks: [],
+  colorMaskTolerance: 30,
   invert: false,
   nozzleDiameter: 0.4,
   threadEnabled: true,
   threadConfig: { ...DEFAULT_THREAD_CONFIG },
 };
+
+export const COLOR_PRESETS = [
+  { label: "Red",    hue: 0,   chipColor: "#ef4444" },
+  { label: "Orange", hue: 30,  chipColor: "#f97316" },
+  { label: "Yellow", hue: 60,  chipColor: "#eab308" },
+  { label: "Green",  hue: 120, chipColor: "#22c55e" },
+  { label: "Cyan",   hue: 180, chipColor: "#06b6d4" },
+  { label: "Blue",   hue: 240, chipColor: "#3b82f6" },
+  { label: "Purple", hue: 280, chipColor: "#a855f7" },
+] as const;
 
 export type TextAlign = "top" | "bottom";
 

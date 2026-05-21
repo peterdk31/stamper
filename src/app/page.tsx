@@ -110,12 +110,10 @@ export default function Home() {
             onBrightnessChange={(v) => setSettings((s) => ({ ...s, brightness: v }))}
             contrast={settings.contrast}
             onContrastChange={(v) => setSettings((s) => ({ ...s, contrast: v }))}
-            redWeight={settings.redWeight}
-            onRedWeightChange={(v) => setSettings((s) => ({ ...s, redWeight: v }))}
-            greenWeight={settings.greenWeight}
-            onGreenWeightChange={(v) => setSettings((s) => ({ ...s, greenWeight: v }))}
-            blueWeight={settings.blueWeight}
-            onBlueWeightChange={(v) => setSettings((s) => ({ ...s, blueWeight: v }))}
+            colorMasks={settings.colorMasks}
+            onColorMasksChange={(v) => setSettings((s) => ({ ...s, colorMasks: v }))}
+            colorMaskTolerance={settings.colorMaskTolerance}
+            onColorMaskToleranceChange={(v) => setSettings((s) => ({ ...s, colorMaskTolerance: v }))}
             invert={settings.invert}
             onInvertChange={(v) => setSettings((s) => ({ ...s, invert: v }))}
           />

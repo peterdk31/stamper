@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { COLOR_PRESETS } from "@/types/stamp";
 
 interface Props {
   imageDataUrl: string | null;
@@ -16,12 +17,10 @@ interface Props {
   onBrightnessChange?: (value: number) => void;
   contrast?: number;
   onContrastChange?: (value: number) => void;
-  redWeight?: number;
-  onRedWeightChange?: (value: number) => void;
-  greenWeight?: number;
-  onGreenWeightChange?: (value: number) => void;
-  blueWeight?: number;
-  onBlueWeightChange?: (value: number) => void;
+  colorMasks?: number[];
+  onColorMasksChange?: (value: number[]) => void;
+  colorMaskTolerance?: number;
+  onColorMaskToleranceChange?: (value: number) => void;
   invert?: boolean;
   onInvertChange?: (value: boolean) => void;
 }
@@ -30,9 +29,8 @@ interface LocalAdj {
   threshold: number;
   brightness: number;
   contrast: number;
-  redWeight: number;
-  greenWeight: number;
-  blueWeight: number;
+  colorMasks: number[];
+  colorMaskTolerance: number;
   invert: boolean;
 }
 
@@ -43,6 +41,31 @@ function adjustPixel(value: number, brightness: number, contrastFactor: number, 
   return value < 0 ? 0 : value > 255 ? 255 : value;
 }
 
+function rgbHue(r: number, g: number, b: number): number {
+  const max = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  const min = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  const delta = max - min;
+  if (delta < 10) return -1;
+  let h: number;
+  if (max === r) h = ((g - b) / delta) % 6;
+  else if (max === g) h = (b - r) / delta + 2;
+  else h = (r - g) / delta + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return h;
+}
+
+function isColorMasked(r: number, g: number, b: number, masks: number[], tolerance: number): boolean {
+  if (masks.length === 0) return false;
+  const h = rgbHue(r, g, b);
+  if (h < 0) return false;
+  for (let i = 0; i < masks.length; i++) {
+    const d = Math.abs(h - masks[i]);
+    if ((d > 180 ? 360 - d : d) <= tolerance) return true;
+  }
+  return false;
+}
+
 export default function ImageUpload({
   imageDataUrl, svgText,
   onImageChange, onSvgChange,
@@ -50,21 +73,20 @@ export default function ImageUpload({
   threshold = 128, onThresholdChange,
   brightness = 0, onBrightnessChange,
   contrast = 0, onContrastChange,
-  redWeight = 30, onRedWeightChange,
-  greenWeight = 59, onGreenWeightChange,
-  blueWeight = 11, onBlueWeightChange,
+  colorMasks = [], onColorMasksChange,
+  colorMaskTolerance = 30, onColorMaskToleranceChange,
   invert = false, onInvertChange,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pixelCacheRef = useRef<ImageData | null>(null);
   const isDraggingRef = useRef(false);
-  const localRef = useRef<LocalAdj>({ threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert });
-  const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert });
+  const localRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert });
+  const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert });
 
   useEffect(() => {
-    propsRef.current = { threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert };
-  }, [threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert]);
+    propsRef.current = { threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert };
+  }, [threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert]);
 
   const thresholdLabelRef = useRef<HTMLSpanElement>(null);
   const thresholdSliderRef = useRef<HTMLInputElement>(null);
@@ -72,12 +94,8 @@ export default function ImageUpload({
   const brightnessSliderRef = useRef<HTMLInputElement>(null);
   const contrastLabelRef = useRef<HTMLSpanElement>(null);
   const contrastSliderRef = useRef<HTMLInputElement>(null);
-  const redLabelRef = useRef<HTMLSpanElement>(null);
-  const redSliderRef = useRef<HTMLInputElement>(null);
-  const greenLabelRef = useRef<HTMLSpanElement>(null);
-  const greenSliderRef = useRef<HTMLInputElement>(null);
-  const blueLabelRef = useRef<HTMLSpanElement>(null);
-  const blueSliderRef = useRef<HTMLInputElement>(null);
+  const toleranceLabelRef = useRef<HTMLSpanElement>(null);
+  const toleranceSliderRef = useRef<HTMLInputElement>(null);
 
   const [adjustOpen, setAdjustOpen] = useState(false);
 
@@ -95,18 +113,21 @@ export default function ImageUpload({
     const dst = out.data;
     const hasAdj = adj.brightness !== 0 || adj.contrast !== 0 || adj.invert;
     const cf = (259 * (adj.contrast + 255)) / (255 * (259 - adj.contrast));
-    const wSum = adj.redWeight + adj.greenWeight + adj.blueWeight;
-    const wr = wSum > 0 ? adj.redWeight / wSum : 1/3;
-    const wg = wSum > 0 ? adj.greenWeight / wSum : 1/3;
-    const wb = wSum > 0 ? adj.blueWeight / wSum : 1/3;
+    const hasMasks = adj.colorMasks.length > 0;
     for (let i = 0; i < src.length; i += 4) {
-      let r = src[i], g = src[i + 1], b = src[i + 2];
+      const r0 = src[i], g0 = src[i + 1], b0 = src[i + 2];
+      if (hasMasks && isColorMasked(r0, g0, b0, adj.colorMasks, adj.colorMaskTolerance)) {
+        dst[i] = dst[i + 1] = dst[i + 2] = 255;
+        dst[i + 3] = 255;
+        continue;
+      }
+      let r = r0, g = g0, b = b0;
       if (hasAdj) {
         r = adjustPixel(r, adj.brightness, cf, adj.invert);
         g = adjustPixel(g, adj.brightness, cf, adj.invert);
         b = adjustPixel(b, adj.brightness, cf, adj.invert);
       }
-      const lum = wr * r + wg * g + wb * b;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
       const v = lum >= adj.threshold ? 255 : 0;
       dst[i] = dst[i + 1] = dst[i + 2] = v;
       dst[i + 3] = 255;
@@ -115,9 +136,7 @@ export default function ImageUpload({
     if (thresholdLabelRef.current) thresholdLabelRef.current.textContent = String(adj.threshold);
     if (brightnessLabelRef.current) brightnessLabelRef.current.textContent = String(adj.brightness);
     if (contrastLabelRef.current) contrastLabelRef.current.textContent = String(adj.contrast);
-    if (redLabelRef.current) redLabelRef.current.textContent = String(adj.redWeight);
-    if (greenLabelRef.current) greenLabelRef.current.textContent = String(adj.greenWeight);
-    if (blueLabelRef.current) blueLabelRef.current.textContent = String(adj.blueWeight);
+    if (toleranceLabelRef.current) toleranceLabelRef.current.textContent = adj.colorMaskTolerance + "°";
   }
 
   useEffect(() => {
@@ -144,16 +163,14 @@ export default function ImageUpload({
 
   useEffect(() => {
     if (!isDraggingRef.current) {
-      const adj = { threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert };
+      const adj = { threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert };
       drawPreview(adj);
       if (thresholdSliderRef.current) thresholdSliderRef.current.value = String(threshold);
       if (brightnessSliderRef.current) brightnessSliderRef.current.value = String(brightness);
       if (contrastSliderRef.current) contrastSliderRef.current.value = String(contrast);
-      if (redSliderRef.current) redSliderRef.current.value = String(redWeight);
-      if (greenSliderRef.current) greenSliderRef.current.value = String(greenWeight);
-      if (blueSliderRef.current) blueSliderRef.current.value = String(blueWeight);
+      if (toleranceSliderRef.current) toleranceSliderRef.current.value = String(colorMaskTolerance);
     }
-  }, [threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert]);
+  }, [threshold, brightness, contrast, colorMasks, colorMaskTolerance, invert]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -200,9 +217,15 @@ export default function ImageUpload({
     drawPreview(localRef.current);
   }
 
+  function toggleColor(hue: number) {
+    const current = propsRef.current.colorMasks;
+    const next = current.includes(hue) ? current.filter((h) => h !== hue) : [...current, hue];
+    onColorMasksChange?.(next);
+  }
+
   const hasContent = imageDataUrl || svgText;
   const showRasterControls = hasContent && onThresholdChange;
-  const hasAdjustments = threshold !== 128 || brightness !== 0 || contrast !== 0 || redWeight !== 30 || greenWeight !== 59 || blueWeight !== 11 || invert;
+  const hasAdjustments = threshold !== 128 || brightness !== 0 || contrast !== 0 || colorMasks.length > 0 || invert;
 
   return (
     <div className="p-4 bg-white rounded-lg shadow space-y-3">
@@ -299,9 +322,8 @@ export default function ImageUpload({
                     onThresholdChange?.(128);
                     onBrightnessChange?.(0);
                     onContrastChange?.(0);
-                    onRedWeightChange?.(30);
-                    onGreenWeightChange?.(59);
-                    onBlueWeightChange?.(11);
+                    onColorMasksChange?.([]);
+                    onColorMaskToleranceChange?.(30);
                     onInvertChange?.(false);
                   }}
                   className="text-xs text-amber-600 hover:text-amber-800"
@@ -385,82 +407,53 @@ export default function ImageUpload({
                 />
               </div>
               <div className="pt-1 border-t border-gray-200">
-                <p className="text-xs text-gray-500 mb-2">Channel mix — increase a color to filter it out</p>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>Red</span>
-                    <span ref={redLabelRef}>{redWeight}</span>
-                  </div>
-                  <input
-                    ref={redSliderRef}
-                    type="range"
-                    min={0}
-                    max={100}
-                    defaultValue={redWeight}
-                    onPointerDown={startDrag}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      localRef.current.redWeight = v;
-                      redrawLocal();
-                      if (!isDraggingRef.current) onRedWeightChange?.(v);
-                    }}
-                    onPointerUp={() => {
-                      isDraggingRef.current = false;
-                      onRedWeightChange?.(localRef.current.redWeight);
-                    }}
-                    className="w-full accent-red-500"
-                  />
+                <p className="text-xs text-gray-500 mb-2">Color removal — click to remove that color</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {COLOR_PRESETS.map((preset) => {
+                    const active = colorMasks.includes(preset.hue);
+                    return (
+                      <button
+                        key={preset.hue}
+                        type="button"
+                        onClick={() => toggleColor(preset.hue)}
+                        title={preset.label}
+                        className="w-7 h-7 rounded border-2 transition-all"
+                        style={{
+                          backgroundColor: preset.chipColor,
+                          borderColor: active ? "#1f2937" : "transparent",
+                          opacity: active ? 1 : 0.4,
+                        }}
+                      />
+                    );
+                  })}
                 </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>Green</span>
-                    <span ref={greenLabelRef}>{greenWeight}</span>
+                {colorMasks.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Tolerance</span>
+                      <span ref={toleranceLabelRef}>{colorMaskTolerance}&deg;</span>
+                    </div>
+                    <input
+                      ref={toleranceSliderRef}
+                      type="range"
+                      min={5}
+                      max={90}
+                      defaultValue={colorMaskTolerance}
+                      onPointerDown={startDrag}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        localRef.current.colorMaskTolerance = v;
+                        redrawLocal();
+                        if (!isDraggingRef.current) onColorMaskToleranceChange?.(v);
+                      }}
+                      onPointerUp={() => {
+                        isDraggingRef.current = false;
+                        onColorMaskToleranceChange?.(localRef.current.colorMaskTolerance);
+                      }}
+                      className="w-full accent-amber-500"
+                    />
                   </div>
-                  <input
-                    ref={greenSliderRef}
-                    type="range"
-                    min={0}
-                    max={100}
-                    defaultValue={greenWeight}
-                    onPointerDown={startDrag}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      localRef.current.greenWeight = v;
-                      redrawLocal();
-                      if (!isDraggingRef.current) onGreenWeightChange?.(v);
-                    }}
-                    onPointerUp={() => {
-                      isDraggingRef.current = false;
-                      onGreenWeightChange?.(localRef.current.greenWeight);
-                    }}
-                    className="w-full accent-green-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>Blue</span>
-                    <span ref={blueLabelRef}>{blueWeight}</span>
-                  </div>
-                  <input
-                    ref={blueSliderRef}
-                    type="range"
-                    min={0}
-                    max={100}
-                    defaultValue={blueWeight}
-                    onPointerDown={startDrag}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      localRef.current.blueWeight = v;
-                      redrawLocal();
-                      if (!isDraggingRef.current) onBlueWeightChange?.(v);
-                    }}
-                    onPointerUp={() => {
-                      isDraggingRef.current = false;
-                      onBlueWeightChange?.(localRef.current.blueWeight);
-                    }}
-                    className="w-full accent-blue-500"
-                  />
-                </div>
+                )}
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
                 <input
