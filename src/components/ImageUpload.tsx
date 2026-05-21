@@ -121,7 +121,9 @@ export default function ImageUpload({
   }
 
   useEffect(() => {
-    if (!imageDataUrl) { pixelCacheRef.current = null; return; }
+    const src = imageDataUrl
+      ?? (svgText ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}` : null);
+    if (!src) { pixelCacheRef.current = null; return; }
     const img = new window.Image();
     img.onload = () => {
       const maxDim = 400;
@@ -132,12 +134,13 @@ export default function ImageUpload({
       off.width = w;
       off.height = h;
       const ctx = off.getContext("2d")!;
+      if (svgText) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); }
       ctx.drawImage(img, 0, 0, w, h);
       pixelCacheRef.current = ctx.getImageData(0, 0, w, h);
       drawPreview(propsRef.current);
     };
-    img.src = imageDataUrl;
-  }, [imageDataUrl]);
+    img.src = src;
+  }, [imageDataUrl, svgText]);
 
   useEffect(() => {
     if (!isDraggingRef.current) {
@@ -198,7 +201,7 @@ export default function ImageUpload({
   }
 
   const hasContent = imageDataUrl || svgText;
-  const showRasterControls = imageDataUrl && !svgText && onThresholdChange;
+  const showRasterControls = hasContent && onThresholdChange;
   const hasAdjustments = threshold !== 128 || brightness !== 0 || contrast !== 0 || redWeight !== 30 || greenWeight !== 59 || blueWeight !== 11 || invert;
 
   return (
@@ -217,18 +220,15 @@ export default function ImageUpload({
       >
         {imageDataUrl || svgText ? (
           <div className="relative">
-            {imageDataUrl ? (
-              <div className="flex gap-2 justify-center items-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageDataUrl} alt="Original" className="max-h-32 max-w-[48%] object-contain" />
-                <canvas ref={canvasRef} className="max-h-32 max-w-[48%]" />
-              </div>
-            ) : (
-              <div
-                className="mx-auto max-h-40 overflow-hidden [&>svg]:max-h-40 [&>svg]:mx-auto [&>svg]:block"
-                dangerouslySetInnerHTML={{ __html: svgText! }}
+            <div className="flex gap-2 justify-center items-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageDataUrl ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText!)}`}
+                alt="Original"
+                className="max-h-32 max-w-[48%] object-contain"
               />
-            )}
+              <canvas ref={canvasRef} className="max-h-32 max-w-[48%]" />
+            </div>
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-white/70">
                 <div className="h-6 w-6 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -292,6 +292,23 @@ export default function ImageUpload({
 
           {adjustOpen && (
             <div className="mt-2 space-y-3 pl-1">
+              {hasAdjustments && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onThresholdChange?.(128);
+                    onBrightnessChange?.(0);
+                    onContrastChange?.(0);
+                    onRedWeightChange?.(30);
+                    onGreenWeightChange?.(59);
+                    onBlueWeightChange?.(11);
+                    onInvertChange?.(false);
+                  }}
+                  className="text-xs text-amber-600 hover:text-amber-800"
+                >
+                  Reset all
+                </button>
+              )}
               <div className="space-y-1">
                 <div className="flex justify-between text-sm text-gray-600">
                   <span>Threshold</span>

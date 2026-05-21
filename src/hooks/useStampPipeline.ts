@@ -154,6 +154,8 @@ function useImageTrace(
             c.width = tw;
             c.height = th;
             const ctx = c.getContext("2d")!;
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(0, 0, tw, th);
             ctx.drawImage(img, 0, 0, tw, th);
             return createImageBitmap(c);
           })()
