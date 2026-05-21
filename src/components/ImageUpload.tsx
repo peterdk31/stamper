@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { COLOR_PRESETS } from "@/types/stamp";
 
 interface Props {
   imageDataUrl: string | null;
@@ -217,10 +216,47 @@ export default function ImageUpload({
     drawPreview(localRef.current);
   }
 
-  function toggleColor(hue: number) {
+  function samplePixel(e: React.MouseEvent<HTMLImageElement>) {
+    e.stopPropagation();
+    const img = e.currentTarget;
+    const rect = img.getBoundingClientRect();
+    const srcData = pixelCacheRef.current;
+    if (!srcData) return;
+
+    const elemAspect = rect.width / rect.height;
+    const imgAspect = srcData.width / srcData.height;
+    let renderW: number, renderH: number, offsetX: number, offsetY: number;
+    if (imgAspect > elemAspect) {
+      renderW = rect.width;
+      renderH = rect.width / imgAspect;
+      offsetX = 0;
+      offsetY = (rect.height - renderH) / 2;
+    } else {
+      renderH = rect.height;
+      renderW = rect.height * imgAspect;
+      offsetX = (rect.width - renderW) / 2;
+      offsetY = 0;
+    }
+
+    const clickX = e.clientX - rect.left - offsetX;
+    const clickY = e.clientY - rect.top - offsetY;
+    if (clickX < 0 || clickY < 0 || clickX >= renderW || clickY >= renderH) return;
+
+    const pixelX = Math.floor((clickX / renderW) * srcData.width);
+    const pixelY = Math.floor((clickY / renderH) * srcData.height);
+    const idx = (pixelY * srcData.width + pixelX) * 4;
+    const r = srcData.data[idx], g = srcData.data[idx + 1], b = srcData.data[idx + 2];
+
+    const hue = rgbHue(r, g, b);
+    if (hue < 0) return;
+
     const current = propsRef.current.colorMasks;
-    const next = current.includes(hue) ? current.filter((h) => h !== hue) : [...current, hue];
-    onColorMasksChange?.(next);
+    const tol = propsRef.current.colorMaskTolerance;
+    const alreadyCovered = current.some((h) => {
+      const d = Math.abs(h - hue);
+      return (d > 180 ? 360 - d : d) <= tol;
+    });
+    if (!alreadyCovered) onColorMasksChange?.([...current, hue]);
   }
 
   const hasContent = imageDataUrl || svgText;
@@ -248,7 +284,8 @@ export default function ImageUpload({
               <img
                 src={imageDataUrl ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText!)}`}
                 alt="Original"
-                className="max-h-32 max-w-[48%] object-contain"
+                className="max-h-32 max-w-[48%] object-contain cursor-crosshair"
+                onClick={samplePixel}
               />
               <canvas ref={canvasRef} className="max-h-32 max-w-[48%]" />
             </div>
@@ -407,52 +444,47 @@ export default function ImageUpload({
                 />
               </div>
               <div className="pt-1 border-t border-gray-200">
-                <p className="text-xs text-gray-500 mb-2">Color removal — click to remove that color</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {COLOR_PRESETS.map((preset) => {
-                    const active = colorMasks.includes(preset.hue);
-                    return (
-                      <button
-                        key={preset.hue}
-                        type="button"
-                        onClick={() => toggleColor(preset.hue)}
-                        title={preset.label}
-                        className="w-7 h-7 rounded border-2 transition-all"
-                        style={{
-                          backgroundColor: preset.chipColor,
-                          borderColor: active ? "#1f2937" : "transparent",
-                          opacity: active ? 1 : 0.4,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
+                <p className="text-xs text-gray-500 mb-1">Click the original image to sample a color to remove</p>
                 {colorMasks.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    <div className="flex justify-between text-sm text-gray-600">
-                      <span>Tolerance</span>
-                      <span ref={toleranceLabelRef}>{colorMaskTolerance}&deg;</span>
+                  <>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {colorMasks.map((hue, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => onColorMasksChange?.(colorMasks.filter((_, j) => j !== i))}
+                          title="Click to remove"
+                          className="w-6 h-6 rounded-full border border-gray-300 hover:border-red-400 hover:scale-110 transition-all"
+                          style={{ backgroundColor: `hsl(${hue}, 70%, 50%)` }}
+                        />
+                      ))}
                     </div>
-                    <input
-                      ref={toleranceSliderRef}
-                      type="range"
-                      min={5}
-                      max={90}
-                      defaultValue={colorMaskTolerance}
-                      onPointerDown={startDrag}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        localRef.current.colorMaskTolerance = v;
-                        redrawLocal();
-                        if (!isDraggingRef.current) onColorMaskToleranceChange?.(v);
-                      }}
-                      onPointerUp={() => {
-                        isDraggingRef.current = false;
-                        onColorMaskToleranceChange?.(localRef.current.colorMaskTolerance);
-                      }}
-                      className="w-full accent-amber-500"
-                    />
-                  </div>
+                    <div className="mt-2 space-y-1">
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>Tolerance</span>
+                        <span ref={toleranceLabelRef}>{colorMaskTolerance}&deg;</span>
+                      </div>
+                      <input
+                        ref={toleranceSliderRef}
+                        type="range"
+                        min={5}
+                        max={90}
+                        defaultValue={colorMaskTolerance}
+                        onPointerDown={startDrag}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          localRef.current.colorMaskTolerance = v;
+                          redrawLocal();
+                          if (!isDraggingRef.current) onColorMaskToleranceChange?.(v);
+                        }}
+                        onPointerUp={() => {
+                          isDraggingRef.current = false;
+                          onColorMaskToleranceChange?.(localRef.current.colorMaskTolerance);
+                        }}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+                  </>
                 )}
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">

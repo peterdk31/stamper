@@ -56,16 +56,6 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   threadConfig: { ...DEFAULT_THREAD_CONFIG },
 };
 
-export const COLOR_PRESETS = [
-  { label: "Red",    hue: 0,   chipColor: "#ef4444" },
-  { label: "Orange", hue: 30,  chipColor: "#f97316" },
-  { label: "Yellow", hue: 60,  chipColor: "#eab308" },
-  { label: "Green",  hue: 120, chipColor: "#22c55e" },
-  { label: "Cyan",   hue: 180, chipColor: "#06b6d4" },
-  { label: "Blue",   hue: 240, chipColor: "#3b82f6" },
-  { label: "Purple", hue: 280, chipColor: "#a855f7" },
-] as const;
-
 export type TextAlign = "top" | "bottom";
 
 export interface StampText {
