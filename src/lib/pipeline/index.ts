@@ -21,11 +21,13 @@
  *   3. Add a usePipelineStep() call in useStampPipeline.ts
  */
 
-export type { PipelineStep, SyncStep, WorkerStep, StepFlags, StepResult } from "./types";
+export type { PipelineStep, SyncStep, WorkerStep, StepFlags, StepResult, StepSlot, StepVariant } from "./types";
+export type { TracerDefinition } from "./tracer-types";
 export { textToDesignData } from "./text";
 export { mergeDesignData } from "./merge";
 export { thickenStep } from "./thicken";
 export { smoothStep } from "./smooth";
+export { TRACERS, STEP_SLOTS, getTracer, getStepVariant } from "./registry";
 
 import type { PipelineStep } from "./types";
 import { thickenStep } from "./thicken";

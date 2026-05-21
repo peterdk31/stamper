@@ -5,6 +5,7 @@ import {
   type ThreadConfig,
 } from "@/types/stamp";
 import SliderInput from "./SliderInput";
+import { STEP_SLOTS } from "@/lib/pipeline/registry";
 
 interface Props {
   settings: StampSettings;
@@ -16,9 +17,13 @@ interface Props {
   hasDesign?: boolean;
   onThickenToggle?: () => void;
   onSmoothToggle?: () => void;
+  thickenAlgorithm?: string;
+  onThickenAlgorithmChange?: (id: string) => void;
 }
 
-export default function StampSettingsPanel({ settings, onChange, thickenEnabled, isThickening, smoothEnabled, isSmoothing, hasDesign, onThickenToggle, onSmoothToggle }: Props) {
+const thickenSlot = STEP_SLOTS.find((s) => s.id === "thicken");
+
+export default function StampSettingsPanel({ settings, onChange, thickenEnabled, isThickening, smoothEnabled, isSmoothing, hasDesign, onThickenToggle, onSmoothToggle, thickenAlgorithm, onThickenAlgorithmChange }: Props) {
   function update(partial: Partial<StampSettings>) {
     onChange({ ...settings, ...partial });
   }
@@ -116,6 +121,24 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
             }`} />
           </button>
         </div>
+        {thickenSlot && thickenSlot.variants.length > 1 && thickenEnabled && onThickenAlgorithmChange && (
+          <div className="flex items-center gap-1 ml-1">
+            {thickenSlot.variants.map((v) => (
+              <button
+                key={v.id}
+                onClick={() => onThickenAlgorithmChange(v.id)}
+                title={v.description}
+                className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  thickenAlgorithm === v.id
+                    ? "bg-amber-700 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )}
       </fieldset>
 
       <fieldset className="space-y-3 border-t pt-4">

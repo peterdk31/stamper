@@ -22,6 +22,8 @@ export default function Home() {
   const [fontsReady, setFontsReady] = useState(false);
   const [thickenEnabled, setThickenEnabled] = useState(true);
   const [smoothEnabled, setSmoothEnabled] = useState(true);
+  const [tracerAlgorithm, setTracerAlgorithm] = useState("marching-squares");
+  const [thickenAlgorithm, setThickenAlgorithm] = useState("edt");
 
   useEffect(() => {
     loadAllBundledFonts().then((entries) => {
@@ -45,6 +47,8 @@ export default function Home() {
     fontsReady,
     thickenEnabled,
     smoothEnabled,
+    tracerAlgorithm,
+    thickenAlgorithm,
   });
 
   const prevImageRef = useRef<string | null>(null);
@@ -102,6 +106,8 @@ export default function Home() {
             progressStage={pipeline.traceStage}
             threshold={settings.threshold}
             onThresholdChange={(v) => setSettings((s) => ({ ...s, threshold: v }))}
+            tracerAlgorithm={tracerAlgorithm}
+            onTracerChange={setTracerAlgorithm}
           />
           <TextEditor
             texts={texts}
@@ -118,6 +124,8 @@ export default function Home() {
             hasDesign={pipeline.hasDesign}
             onThickenToggle={() => setThickenEnabled((v) => !v)}
             onSmoothToggle={() => setSmoothEnabled((v) => !v)}
+            thickenAlgorithm={thickenAlgorithm}
+            onThickenAlgorithmChange={setThickenAlgorithm}
           />
         </aside>
       </div>

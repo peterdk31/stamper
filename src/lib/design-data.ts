@@ -45,22 +45,35 @@ export function rasterToDesignData(
   };
 }
 
+function signedArea(pts: { x: number; y: number }[]): number {
+  let a = 0;
+  for (let p = pts.length - 1, q = 0; q < pts.length; p = q++) {
+    a += pts[p].x * pts[q].y - pts[q].x * pts[p].y;
+  }
+  return a * 0.5;
+}
+
 export function designDataToShapes(data: DesignData): THREE.Shape[] {
   const result: THREE.Shape[] = [];
   for (const sd of data.shapes) {
     if (sd.outer.length < 3) continue;
     if (sd.outer.length <= 200 && hasSelfIntersection(sd.outer)) continue;
+
+    // Outers must be CCW (positive area), holes CW (negative area)
+    const outer = signedArea(sd.outer) < 0 ? [...sd.outer].reverse() : sd.outer;
+
     const shape = new THREE.Shape();
-    shape.moveTo(sd.outer[0].x, sd.outer[0].y);
-    for (let i = 1; i < sd.outer.length; i++) shape.lineTo(sd.outer[i].x, sd.outer[i].y);
+    shape.moveTo(outer[0].x, outer[0].y);
+    for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i].x, outer[i].y);
     shape.closePath();
 
     for (const hole of sd.holes) {
       if (hole.length < 3) continue;
       if (hole.length <= 200 && hasSelfIntersection(hole)) continue;
+      const h = signedArea(hole) > 0 ? [...hole].reverse() : hole;
       const path = new THREE.Path();
-      path.moveTo(hole[0].x, hole[0].y);
-      for (let i = 1; i < hole.length; i++) path.lineTo(hole[i].x, hole[i].y);
+      path.moveTo(h[0].x, h[0].y);
+      for (let i = 1; i < h.length; i++) path.lineTo(h[i].x, h[i].y);
       shape.holes.push(path);
     }
 

@@ -4,14 +4,14 @@ import { useState, useEffect, useMemo, useRef, useReducer } from "react";
 import * as THREE from "three";
 import type { StampSettings, StampText, DesignData, ThinFeatureMap } from "@/types/stamp";
 import type { StampShapeData } from "@/types/stamp";
-import type { TraceMessage } from "@/lib/image-trace.worker";
 import { rasterToDesignData, designDataToShapes } from "@/lib/design-data";
 import { getFontCache } from "@/lib/font-manager";
 import { computeRequiredHeight, computeRequiredWidth } from "@/lib/text-to-shapes";
 import { textToDesignData } from "@/lib/pipeline/text";
 import { mergeDesignData } from "@/lib/pipeline/merge";
-import { thickenStep } from "@/lib/pipeline/thicken";
 import { smoothStep } from "@/lib/pipeline/smooth";
+import { getTracer, getStepVariant } from "@/lib/pipeline/registry";
+import type { TracerDefinition } from "@/lib/pipeline/tracer-types";
 import type { StepFlags } from "@/lib/pipeline/types";
 import { usePipelineStep } from "./usePipelineStep";
 
@@ -28,6 +28,8 @@ export interface PipelineInputs {
   fontsReady: boolean;
   thickenEnabled: boolean;
   smoothEnabled: boolean;
+  tracerAlgorithm: string;
+  thickenAlgorithm: string;
 }
 
 export interface PipelineOutputs {
@@ -101,6 +103,7 @@ interface TraceOutput {
 }
 
 function useImageTrace(
+  tracer: TracerDefinition,
   imageDataUrl: string | null,
   svgText: string | null,
   threshold: number,
@@ -165,18 +168,23 @@ function useImageTrace(
 
         dispatch({ type: "loading", stage: "Starting…" });
 
-        const worker = new Worker(
-          new URL("../lib/image-trace.worker.ts", import.meta.url),
-        );
+        const worker = tracer.createWorker();
         workerRef.current = worker;
 
-        worker.onmessage = (e: MessageEvent<TraceMessage>) => {
+        worker.onmessage = (e: MessageEvent) => {
           if (cancelled || workerRef.current !== worker) return;
-          const msg = e.data;
-          if (msg.type === "progress") {
-            dispatch({ type: "progress", progress: msg.progress, stage: msg.stage });
-          } else if (msg.type === "result") {
-            dispatch({ type: "result", shapes: msg.shapes, imageWidth: msg.imageWidth, imageHeight: msg.imageHeight });
+
+          if (tracer.parseProgress) {
+            const p = tracer.parseProgress(e.data);
+            if (p) {
+              dispatch({ type: "progress", progress: p.progress, stage: p.stage });
+              return;
+            }
+          }
+
+          const result = tracer.parseResult(e.data);
+          if (result) {
+            dispatch({ type: "result", shapes: result.shapes, imageWidth: result.imageWidth, imageHeight: result.imageHeight });
             worker.terminate();
             if (workerRef.current === worker) workerRef.current = null;
           }
@@ -189,7 +197,8 @@ function useImageTrace(
           if (workerRef.current === worker) workerRef.current = null;
         };
 
-        worker.postMessage({ bitmap, threshold }, [bitmap]);
+        const msg = tracer.buildMessage(bitmap, threshold);
+        worker.postMessage(msg, [bitmap]);
       }).catch(() => {
         if (!cancelled) dispatch({ type: "error" });
       });
@@ -204,7 +213,7 @@ function useImageTrace(
         workerRef.current = null;
       }
     };
-  }, [imageDataUrl, svgText, threshold]);
+  }, [imageDataUrl, svgText, threshold, tracer]);
 
   const sourceAspectRatio = useMemo(() => {
     if (state.rawImageDims) return state.rawImageDims.w / state.rawImageDims.h;
@@ -287,10 +296,11 @@ function useEffectiveSettings(
 // ---------------------------------------------------------------------------
 
 export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
-  const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled, smoothEnabled } = inputs;
+  const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled, smoothEnabled, tracerAlgorithm, thickenAlgorithm } = inputs;
 
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
-  const trace = useImageTrace(imageDataUrl, svgText, settings.threshold);
+  const tracer = useMemo(() => getTracer(tracerAlgorithm), [tracerAlgorithm]);
+  const trace = useImageTrace(tracer, imageDataUrl, svgText, settings.threshold);
 
   const hasImage = !!(trace.rawShapes && trace.rawImageDims);
 
@@ -326,7 +336,7 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   }, [trace.rawShapes, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData]);
 
   // 5. Smooth image data (before merge — smoothing should not apply to text)
-  const stepFlags: StepFlags = { thickenEnabled, smoothEnabled };
+  const stepFlags: StepFlags = { thickenEnabled, smoothEnabled, tracerAlgorithm, thickenAlgorithm };
   const afterSmooth = usePipelineStep(smoothStep, imageData, effectiveSettings, stepFlags);
 
   // 6. Merge sources (smoothed image + raw text)
@@ -335,8 +345,9 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     [afterSmooth.data, textLayout.textData],
   );
 
-  // 7. Processing chain (post-merge)
-  const afterThicken = usePipelineStep(thickenStep, merged, effectiveSettings, stepFlags);
+  // 7. Processing chain (post-merge) — thicken step resolved from registry
+  const resolvedThickenStep = useMemo(() => getStepVariant("thicken", thickenAlgorithm), [thickenAlgorithm]);
+  const afterThicken = usePipelineStep(resolvedThickenStep, merged, effectiveSettings, stepFlags);
 
   // 8. Output: DesignData → THREE.Shape[]
   const shapes = useMemo(

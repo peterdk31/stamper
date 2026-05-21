@@ -3,6 +3,22 @@ import type { StampSettings, DesignData } from "@/types/stamp";
 export interface StepFlags {
   thickenEnabled: boolean;
   smoothEnabled: boolean;
+  tracerAlgorithm: string;
+  thickenAlgorithm: string;
+}
+
+export interface StepVariant {
+  id: string;
+  label: string;
+  description: string;
+  step: PipelineStep;
+}
+
+export interface StepSlot {
+  id: string;
+  label: string;
+  defaultId: string;
+  variants: StepVariant[];
 }
 
 export type SyncStep = {
