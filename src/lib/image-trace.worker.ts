@@ -269,7 +269,7 @@ function rgbHue(r: number, g: number, b: number): number {
   const max = r > g ? (r > b ? r : b) : (g > b ? g : b);
   const min = r < g ? (r < b ? r : b) : (g < b ? g : b);
   const delta = max - min;
-  if (delta < 3) return -1;
+  if (delta === 0) return -1;
   let h: number;
   if (max === r) h = ((g - b) / delta) % 6;
   else if (max === g) h = (b - r) / delta + 2;
