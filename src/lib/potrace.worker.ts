@@ -181,6 +181,53 @@ function decompose(
 }
 
 // ---------------------------------------------------------------------------
+// Pre-simplification — reduce huge boundary paths before the O(n²) optimizer
+// ---------------------------------------------------------------------------
+
+function rdpSimplify(pts: Point[], tolSq: number): Point[] {
+  if (pts.length <= 3) return pts;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const dx = last.x - first.x;
+  const dy = last.y - first.y;
+  const lenSq = dx * dx + dy * dy;
+
+  let maxDistSq = 0;
+  let maxIdx = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const ex = pts[i].x - first.x;
+    const ey = pts[i].y - first.y;
+    const distSq = lenSq === 0
+      ? ex * ex + ey * ey
+      : (ex * dy - ey * dx) ** 2 / lenSq;
+    if (distSq > maxDistSq) {
+      maxDistSq = distSq;
+      maxIdx = i;
+    }
+  }
+
+  if (maxDistSq > tolSq) {
+    const left = rdpSimplify(pts.slice(0, maxIdx + 1), tolSq);
+    const right = rdpSimplify(pts.slice(maxIdx), tolSq);
+    return left.slice(0, -1).concat(right);
+  }
+  return [first, last];
+}
+
+const MAX_PATH_POINTS = 4000;
+
+function preSimplify(pts: Point[]): Point[] {
+  if (pts.length <= MAX_PATH_POINTS) return pts;
+  let tol = 0.25;
+  let result = rdpSimplify(pts, tol);
+  while (result.length > MAX_PATH_POINTS && tol < 16) {
+    tol *= 2;
+    result = rdpSimplify(pts, tol);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Polygon optimization — greedy longest-segment forward scan
 // ---------------------------------------------------------------------------
 
@@ -344,9 +391,10 @@ self.onmessage = (e: MessageEvent<{ bitmap: ImageBitmap; threshold: number }>) =
 
   let contours: Point[][] = [];
   for (let i = 0; i < paths.length; i++) {
-    let opt = optimizeContour(paths[i]);
+    const simplified = preSimplify(paths[i]);
+    let opt = optimizeContour(simplified);
     if (opt.length >= 3 && hasSelfIntersection(opt)) {
-      opt = paths[i];
+      opt = simplified;
     }
     if (opt.length >= 3 && !hasSelfIntersection(opt)) {
       contours.push(opt);

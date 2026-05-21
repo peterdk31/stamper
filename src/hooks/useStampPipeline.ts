@@ -135,7 +135,7 @@ function useImageTrace(
 
     img.onload = () => {
       if (cancelled) return;
-      const MAX_TRACE_DIM = 2000;
+      const MAX_TRACE_DIM = tracer.maxDimension ?? 2000;
       const scale = svgText
         ? MAX_TRACE_DIM / Math.max(img.width, img.height)
         : Math.min(1, MAX_TRACE_DIM / Math.max(img.width, img.height));

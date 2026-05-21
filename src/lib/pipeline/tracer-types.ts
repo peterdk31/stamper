@@ -4,6 +4,7 @@ export interface TracerDefinition {
   id: string;
   label: string;
   description: string;
+  maxDimension?: number;
   createWorker: () => Worker;
   buildMessage: (bitmap: ImageBitmap, threshold: number) => unknown;
   parseResult: (msg: unknown) => {
