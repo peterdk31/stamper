@@ -271,7 +271,7 @@ export default function ImageUpload({
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
         onClick={() => !isProcessing && inputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-lg p-4 sm:p-6 text-center transition-colors ${
+        className={`relative border-2 border-dashed rounded-lg p-2 text-center transition-colors ${
           isProcessing
             ? "border-amber-400 cursor-wait"
             : "border-gray-300 cursor-pointer hover:border-amber-500"
@@ -284,10 +284,10 @@ export default function ImageUpload({
               <img
                 src={imageDataUrl ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText!)}`}
                 alt="Original"
-                className="max-h-32 max-w-[48%] object-contain cursor-crosshair"
+                className="max-h-48 max-w-[48%] object-contain cursor-crosshair"
                 onClick={samplePixel}
               />
-              <canvas ref={canvasRef} className="max-h-32 max-w-[48%]" />
+              <canvas ref={canvasRef} className="max-h-48 max-w-[48%]" />
             </div>
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-white/70">
