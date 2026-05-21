@@ -26,6 +26,12 @@ export interface StampSettings {
   margin: number; // mm — extra base material around the design
   simplification: number; // 0–1, controls raster trace detail
   threshold: number; // 0–255, luminance cutoff for black/white conversion
+  brightness: number; // -100..100, applied before threshold
+  contrast: number; // -100..100, applied before threshold
+  redWeight: number; // 0–100, channel contribution to grayscale
+  greenWeight: number;
+  blueWeight: number;
+  invert: boolean; // flip dark/light before threshold
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
@@ -41,6 +47,12 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   margin: 3,
   simplification: 0.5,
   threshold: 128,
+  brightness: 0,
+  contrast: 0,
+  redWeight: 30,
+  greenWeight: 59,
+  blueWeight: 11,
+  invert: false,
   nozzleDiameter: 0.4,
   threadEnabled: true,
   threadConfig: { ...DEFAULT_THREAD_CONFIG },

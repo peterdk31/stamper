@@ -10,7 +10,7 @@ export const potraceTracer: TracerDefinition = {
   createWorker: () =>
     new Worker(new URL("../../potrace.worker.ts", import.meta.url)),
 
-  buildMessage: (bitmap, threshold) => ({ bitmap, threshold }),
+  buildMessage: (bitmap, adjustments) => ({ bitmap, ...adjustments }),
 
   parseResult: (message) => {
     const msg = message as TraceMessage;

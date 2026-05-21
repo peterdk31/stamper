@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 interface Props {
   imageDataUrl: string | null;
@@ -12,6 +12,35 @@ interface Props {
   progressStage?: string;
   threshold?: number;
   onThresholdChange?: (value: number) => void;
+  brightness?: number;
+  onBrightnessChange?: (value: number) => void;
+  contrast?: number;
+  onContrastChange?: (value: number) => void;
+  redWeight?: number;
+  onRedWeightChange?: (value: number) => void;
+  greenWeight?: number;
+  onGreenWeightChange?: (value: number) => void;
+  blueWeight?: number;
+  onBlueWeightChange?: (value: number) => void;
+  invert?: boolean;
+  onInvertChange?: (value: boolean) => void;
+}
+
+interface LocalAdj {
+  threshold: number;
+  brightness: number;
+  contrast: number;
+  redWeight: number;
+  greenWeight: number;
+  blueWeight: number;
+  invert: boolean;
+}
+
+function adjustPixel(value: number, brightness: number, contrastFactor: number, inv: boolean): number {
+  if (inv) value = 255 - value;
+  value += brightness;
+  value = (value - 128) * contrastFactor + 128;
+  return value < 0 ? 0 : value > 255 ? 255 : value;
 }
 
 export default function ImageUpload({
@@ -19,18 +48,40 @@ export default function ImageUpload({
   onImageChange, onSvgChange,
   isProcessing, progress = 0, progressStage = "",
   threshold = 128, onThresholdChange,
+  brightness = 0, onBrightnessChange,
+  contrast = 0, onContrastChange,
+  redWeight = 30, onRedWeightChange,
+  greenWeight = 59, onGreenWeightChange,
+  blueWeight = 11, onBlueWeightChange,
+  invert = false, onInvertChange,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pixelCacheRef = useRef<ImageData | null>(null);
   const isDraggingRef = useRef(false);
-  const localThresholdRef = useRef(threshold);
-  const thresholdRef = useRef(threshold);
-  thresholdRef.current = threshold;
-  const labelRef = useRef<HTMLSpanElement>(null);
-  const sliderRef = useRef<HTMLInputElement>(null);
+  const localRef = useRef<LocalAdj>({ threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert });
+  const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert });
 
-  function drawThreshold(t: number) {
+  useEffect(() => {
+    propsRef.current = { threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert };
+  }, [threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert]);
+
+  const thresholdLabelRef = useRef<HTMLSpanElement>(null);
+  const thresholdSliderRef = useRef<HTMLInputElement>(null);
+  const brightnessLabelRef = useRef<HTMLSpanElement>(null);
+  const brightnessSliderRef = useRef<HTMLInputElement>(null);
+  const contrastLabelRef = useRef<HTMLSpanElement>(null);
+  const contrastSliderRef = useRef<HTMLInputElement>(null);
+  const redLabelRef = useRef<HTMLSpanElement>(null);
+  const redSliderRef = useRef<HTMLInputElement>(null);
+  const greenLabelRef = useRef<HTMLSpanElement>(null);
+  const greenSliderRef = useRef<HTMLInputElement>(null);
+  const blueLabelRef = useRef<HTMLSpanElement>(null);
+  const blueSliderRef = useRef<HTMLInputElement>(null);
+
+  const [adjustOpen, setAdjustOpen] = useState(false);
+
+  function drawPreview(adj: LocalAdj) {
     const canvas = canvasRef.current;
     const srcData = pixelCacheRef.current;
     if (!canvas || !srcData) return;
@@ -42,14 +93,31 @@ export default function ImageUpload({
     const out = ctx.createImageData(srcData.width, srcData.height);
     const src = srcData.data;
     const dst = out.data;
+    const hasAdj = adj.brightness !== 0 || adj.contrast !== 0 || adj.invert;
+    const cf = (259 * (adj.contrast + 255)) / (255 * (259 - adj.contrast));
+    const wSum = adj.redWeight + adj.greenWeight + adj.blueWeight;
+    const wr = wSum > 0 ? adj.redWeight / wSum : 1/3;
+    const wg = wSum > 0 ? adj.greenWeight / wSum : 1/3;
+    const wb = wSum > 0 ? adj.blueWeight / wSum : 1/3;
     for (let i = 0; i < src.length; i += 4) {
-      const lum = 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
-      const v = lum >= t ? 255 : 0;
+      let r = src[i], g = src[i + 1], b = src[i + 2];
+      if (hasAdj) {
+        r = adjustPixel(r, adj.brightness, cf, adj.invert);
+        g = adjustPixel(g, adj.brightness, cf, adj.invert);
+        b = adjustPixel(b, adj.brightness, cf, adj.invert);
+      }
+      const lum = wr * r + wg * g + wb * b;
+      const v = lum >= adj.threshold ? 255 : 0;
       dst[i] = dst[i + 1] = dst[i + 2] = v;
       dst[i + 3] = 255;
     }
     ctx.putImageData(out, 0, 0);
-    if (labelRef.current) labelRef.current.textContent = String(t);
+    if (thresholdLabelRef.current) thresholdLabelRef.current.textContent = String(adj.threshold);
+    if (brightnessLabelRef.current) brightnessLabelRef.current.textContent = String(adj.brightness);
+    if (contrastLabelRef.current) contrastLabelRef.current.textContent = String(adj.contrast);
+    if (redLabelRef.current) redLabelRef.current.textContent = String(adj.redWeight);
+    if (greenLabelRef.current) greenLabelRef.current.textContent = String(adj.greenWeight);
+    if (blueLabelRef.current) blueLabelRef.current.textContent = String(adj.blueWeight);
   }
 
   useEffect(() => {
@@ -66,19 +134,23 @@ export default function ImageUpload({
       const ctx = off.getContext("2d")!;
       ctx.drawImage(img, 0, 0, w, h);
       pixelCacheRef.current = ctx.getImageData(0, 0, w, h);
-      drawThreshold(thresholdRef.current);
+      drawPreview(propsRef.current);
     };
     img.src = imageDataUrl;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageDataUrl]);
 
   useEffect(() => {
     if (!isDraggingRef.current) {
-      drawThreshold(threshold);
-      if (sliderRef.current) sliderRef.current.value = String(threshold);
+      const adj = { threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert };
+      drawPreview(adj);
+      if (thresholdSliderRef.current) thresholdSliderRef.current.value = String(threshold);
+      if (brightnessSliderRef.current) brightnessSliderRef.current.value = String(brightness);
+      if (contrastSliderRef.current) contrastSliderRef.current.value = String(contrast);
+      if (redSliderRef.current) redSliderRef.current.value = String(redWeight);
+      if (greenSliderRef.current) greenSliderRef.current.value = String(greenWeight);
+      if (blueSliderRef.current) blueSliderRef.current.value = String(blueWeight);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threshold]);
+  }, [threshold, brightness, contrast, redWeight, greenWeight, blueWeight, invert]);
 
   const handleFile = useCallback(
     (file: File) => {
@@ -116,7 +188,18 @@ export default function ImageUpload({
     onSvgChange(null);
   }
 
+  function startDrag() {
+    isDraggingRef.current = true;
+    localRef.current = { ...propsRef.current };
+  }
+
+  function redrawLocal() {
+    drawPreview(localRef.current);
+  }
+
   const hasContent = imageDataUrl || svgText;
+  const showRasterControls = imageDataUrl && !svgText && onThresholdChange;
+  const hasAdjustments = threshold !== 128 || brightness !== 0 || contrast !== 0 || redWeight !== 30 || greenWeight !== 59 || blueWeight !== 11 || invert;
 
   return (
     <div className="p-4 bg-white rounded-lg shadow space-y-3">
@@ -195,37 +278,186 @@ export default function ImageUpload({
         )}
       </div>
 
-      {imageDataUrl && !svgText && onThresholdChange && (
-        <div className="space-y-1">
-          <div className="flex justify-between text-sm text-gray-600">
-            <span>Threshold</span>
-            <span ref={labelRef}>{threshold}</span>
-          </div>
-          <input
-            ref={sliderRef}
-            type="range"
-            min={1}
-            max={255}
-            defaultValue={threshold}
-            onPointerDown={() => {
-              isDraggingRef.current = true;
-              localThresholdRef.current = threshold;
-            }}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              localThresholdRef.current = v;
-              drawThreshold(v);
-              if (!isDraggingRef.current) onThresholdChange(v);
-            }}
-            onPointerUp={() => {
-              isDraggingRef.current = false;
-              onThresholdChange(localThresholdRef.current);
-            }}
-            className="w-full accent-amber-500"
-          />
+      {showRasterControls && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setAdjustOpen((v) => !v)}
+            className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-800"
+          >
+            <span className={`inline-block transition-transform ${adjustOpen ? "rotate-90" : ""}`}>&#9654;</span>
+            <span>Image Adjustments</span>
+            {hasAdjustments && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />}
+          </button>
+
+          {adjustOpen && (
+            <div className="mt-2 space-y-3 pl-1">
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Threshold</span>
+                  <span ref={thresholdLabelRef}>{threshold}</span>
+                </div>
+                <input
+                  ref={thresholdSliderRef}
+                  type="range"
+                  min={1}
+                  max={255}
+                  defaultValue={threshold}
+                  onPointerDown={startDrag}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    localRef.current.threshold = v;
+                    redrawLocal();
+                    if (!isDraggingRef.current) onThresholdChange!(v);
+                  }}
+                  onPointerUp={() => {
+                    isDraggingRef.current = false;
+                    onThresholdChange!(localRef.current.threshold);
+                  }}
+                  className="w-full accent-amber-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Brightness</span>
+                  <span ref={brightnessLabelRef}>{brightness}</span>
+                </div>
+                <input
+                  ref={brightnessSliderRef}
+                  type="range"
+                  min={-100}
+                  max={100}
+                  defaultValue={brightness}
+                  onPointerDown={startDrag}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    localRef.current.brightness = v;
+                    redrawLocal();
+                    if (!isDraggingRef.current) onBrightnessChange?.(v);
+                  }}
+                  onPointerUp={() => {
+                    isDraggingRef.current = false;
+                    onBrightnessChange?.(localRef.current.brightness);
+                  }}
+                  className="w-full accent-amber-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Contrast</span>
+                  <span ref={contrastLabelRef}>{contrast}</span>
+                </div>
+                <input
+                  ref={contrastSliderRef}
+                  type="range"
+                  min={-100}
+                  max={100}
+                  defaultValue={contrast}
+                  onPointerDown={startDrag}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    localRef.current.contrast = v;
+                    redrawLocal();
+                    if (!isDraggingRef.current) onContrastChange?.(v);
+                  }}
+                  onPointerUp={() => {
+                    isDraggingRef.current = false;
+                    onContrastChange?.(localRef.current.contrast);
+                  }}
+                  className="w-full accent-amber-500"
+                />
+              </div>
+              <div className="pt-1 border-t border-gray-200">
+                <p className="text-xs text-gray-500 mb-2">Channel mix — increase a color to filter it out</p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Red</span>
+                    <span ref={redLabelRef}>{redWeight}</span>
+                  </div>
+                  <input
+                    ref={redSliderRef}
+                    type="range"
+                    min={0}
+                    max={100}
+                    defaultValue={redWeight}
+                    onPointerDown={startDrag}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      localRef.current.redWeight = v;
+                      redrawLocal();
+                      if (!isDraggingRef.current) onRedWeightChange?.(v);
+                    }}
+                    onPointerUp={() => {
+                      isDraggingRef.current = false;
+                      onRedWeightChange?.(localRef.current.redWeight);
+                    }}
+                    className="w-full accent-red-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Green</span>
+                    <span ref={greenLabelRef}>{greenWeight}</span>
+                  </div>
+                  <input
+                    ref={greenSliderRef}
+                    type="range"
+                    min={0}
+                    max={100}
+                    defaultValue={greenWeight}
+                    onPointerDown={startDrag}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      localRef.current.greenWeight = v;
+                      redrawLocal();
+                      if (!isDraggingRef.current) onGreenWeightChange?.(v);
+                    }}
+                    onPointerUp={() => {
+                      isDraggingRef.current = false;
+                      onGreenWeightChange?.(localRef.current.greenWeight);
+                    }}
+                    className="w-full accent-green-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Blue</span>
+                    <span ref={blueLabelRef}>{blueWeight}</span>
+                  </div>
+                  <input
+                    ref={blueSliderRef}
+                    type="range"
+                    min={0}
+                    max={100}
+                    defaultValue={blueWeight}
+                    onPointerDown={startDrag}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      localRef.current.blueWeight = v;
+                      redrawLocal();
+                      if (!isDraggingRef.current) onBlueWeightChange?.(v);
+                    }}
+                    onPointerUp={() => {
+                      isDraggingRef.current = false;
+                      onBlueWeightChange?.(localRef.current.blueWeight);
+                    }}
+                    className="w-full accent-blue-500"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={invert}
+                  onChange={(e) => onInvertChange?.(e.target.checked)}
+                  className="accent-amber-500"
+                />
+                Invert
+              </label>
+            </div>
+          )}
         </div>
       )}
-
     </div>
   );
 }

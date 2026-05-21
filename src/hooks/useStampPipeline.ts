@@ -11,7 +11,7 @@ import { textToDesignData } from "@/lib/pipeline/text";
 import { mergeDesignData } from "@/lib/pipeline/merge";
 import { smoothStep } from "@/lib/pipeline/smooth";
 import { getTracer, getStepVariant } from "@/lib/pipeline/registry";
-import type { TracerDefinition } from "@/lib/pipeline/tracer-types";
+import type { TracerDefinition, ImageAdjustments } from "@/lib/pipeline/tracer-types";
 import type { StepFlags } from "@/lib/pipeline/types";
 import { usePipelineStep } from "./usePipelineStep";
 
@@ -106,7 +106,7 @@ function useImageTrace(
   tracer: TracerDefinition,
   imageDataUrl: string | null,
   svgText: string | null,
-  threshold: number,
+  adjustments: ImageAdjustments,
 ): TraceOutput {
   const [state, dispatch] = useReducer(traceReducer, INITIAL_TRACE_STATE);
   const workerRef = useRef<Worker | null>(null);
@@ -197,7 +197,7 @@ function useImageTrace(
           if (workerRef.current === worker) workerRef.current = null;
         };
 
-        const msg = tracer.buildMessage(bitmap, threshold);
+        const msg = tracer.buildMessage(bitmap, adjustments);
         worker.postMessage(msg, [bitmap]);
       }).catch(() => {
         if (!cancelled) dispatch({ type: "error" });
@@ -213,7 +213,7 @@ function useImageTrace(
         workerRef.current = null;
       }
     };
-  }, [imageDataUrl, svgText, threshold, tracer]);
+  }, [imageDataUrl, svgText, adjustments, tracer]);
 
   const sourceAspectRatio = useMemo(() => {
     if (state.rawImageDims) return state.rawImageDims.w / state.rawImageDims.h;
@@ -300,7 +300,16 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
 
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
   const tracer = useMemo(() => getTracer(tracerAlgorithm), [tracerAlgorithm]);
-  const trace = useImageTrace(tracer, imageDataUrl, svgText, settings.threshold);
+  const adjustments = useMemo<ImageAdjustments>(() => ({
+    threshold: settings.threshold,
+    brightness: settings.brightness,
+    contrast: settings.contrast,
+    redWeight: settings.redWeight,
+    greenWeight: settings.greenWeight,
+    blueWeight: settings.blueWeight,
+    invert: settings.invert,
+  }), [settings.threshold, settings.brightness, settings.contrast, settings.redWeight, settings.greenWeight, settings.blueWeight, settings.invert]);
+  const trace = useImageTrace(tracer, imageDataUrl, svgText, adjustments);
 
   const hasImage = !!(trace.rawShapes && trace.rawImageDims);
 

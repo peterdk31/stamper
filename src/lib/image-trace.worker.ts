@@ -113,6 +113,12 @@ function nestContours(contours: Point[][]): ShapeData[] {
 export interface TraceRequest {
   bitmap: ImageBitmap;
   threshold: number;
+  brightness: number;
+  contrast: number;
+  redWeight: number;
+  greenWeight: number;
+  blueWeight: number;
+  invert: boolean;
 }
 
 export type TraceMessage =
@@ -253,8 +259,15 @@ function marchingSquares(
   return contours;
 }
 
+function adjustPixel(value: number, brightness: number, contrastFactor: number, invert: boolean): number {
+  if (invert) value = 255 - value;
+  value += brightness;
+  value = (value - 128) * contrastFactor + 128;
+  return value < 0 ? 0 : value > 255 ? 255 : value;
+}
+
 self.onmessage = (e: MessageEvent<TraceRequest>) => {
-  const { bitmap, threshold } = e.data;
+  const { bitmap, threshold, brightness = 0, contrast = 0, redWeight = 30, greenWeight = 59, blueWeight = 11, invert = false } = e.data;
 
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
   const ctx = canvas.getContext("2d")!;
@@ -277,6 +290,13 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
 
   report(0, "Building pixel grid…");
 
+  const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+  const hasAdjustments = brightness !== 0 || contrast !== 0 || invert;
+  const wSum = redWeight + greenWeight + blueWeight;
+  const wr = wSum > 0 ? redWeight / wSum : 1/3;
+  const wg = wSum > 0 ? greenWeight / wSum : 1/3;
+  const wb = wSum > 0 ? blueWeight / wSum : 1/3;
+
   const n = width * height;
   const grid = new Uint8Array(n);
   for (let y = 0; y < height; y++) {
@@ -284,7 +304,13 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
     const dataRowStart = rowStart * 4;
     for (let x = 0; x < width; x++) {
       const off = dataRowStart + x * 4;
-      const luminance = 0.299 * data[off] + 0.587 * data[off + 1] + 0.114 * data[off + 2];
+      let r = data[off], g = data[off + 1], b = data[off + 2];
+      if (hasAdjustments) {
+        r = adjustPixel(r, brightness, contrastFactor, invert);
+        g = adjustPixel(g, brightness, contrastFactor, invert);
+        b = adjustPixel(b, brightness, contrastFactor, invert);
+      }
+      const luminance = wr * r + wg * g + wb * b;
       grid[rowStart + x] = (data[off + 3] > 128 && luminance < threshold) ? 1 : 0;
     }
     if (y % 50 === 0) report(0.15 * (y / height), "Building pixel grid…");

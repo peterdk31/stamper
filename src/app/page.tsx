@@ -106,6 +106,18 @@ export default function Home() {
             progressStage={pipeline.traceStage}
             threshold={settings.threshold}
             onThresholdChange={(v) => setSettings((s) => ({ ...s, threshold: v }))}
+            brightness={settings.brightness}
+            onBrightnessChange={(v) => setSettings((s) => ({ ...s, brightness: v }))}
+            contrast={settings.contrast}
+            onContrastChange={(v) => setSettings((s) => ({ ...s, contrast: v }))}
+            redWeight={settings.redWeight}
+            onRedWeightChange={(v) => setSettings((s) => ({ ...s, redWeight: v }))}
+            greenWeight={settings.greenWeight}
+            onGreenWeightChange={(v) => setSettings((s) => ({ ...s, greenWeight: v }))}
+            blueWeight={settings.blueWeight}
+            onBlueWeightChange={(v) => setSettings((s) => ({ ...s, blueWeight: v }))}
+            invert={settings.invert}
+            onInvertChange={(v) => setSettings((s) => ({ ...s, invert: v }))}
           />
           <TextEditor
             texts={texts}

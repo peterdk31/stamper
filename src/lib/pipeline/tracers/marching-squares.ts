@@ -9,7 +9,7 @@ export const marchingSquaresTracer: TracerDefinition = {
   createWorker: () =>
     new Worker(new URL("../../image-trace.worker.ts", import.meta.url)),
 
-  buildMessage: (bitmap, threshold) => ({ bitmap, threshold }),
+  buildMessage: (bitmap, adjustments) => ({ bitmap, ...adjustments }),
 
   parseResult: (message) => {
     const msg = message as TraceMessage;
