@@ -326,7 +326,7 @@ function rgbHue(r: number, g: number, b: number): number {
   const max = r > g ? (r > b ? r : b) : (g > b ? g : b);
   const min = r < g ? (r < b ? r : b) : (g < b ? g : b);
   const delta = max - min;
-  if (delta === 0) return -1;
+  if (delta === 0) return 0;
   let h: number;
   if (max === r) h = ((g - b) / delta) % 6;
   else if (max === g) h = (b - r) / delta + 2;
@@ -339,7 +339,6 @@ function rgbHue(r: number, g: number, b: number): number {
 function isColorMasked(r: number, g: number, b: number, masks: number[], tolerance: number): boolean {
   if (masks.length === 0) return false;
   const h = rgbHue(r, g, b);
-  if (h < 0) return false;
   for (let i = 0; i < masks.length; i++) {
     const d = Math.abs(h - masks[i]);
     if ((d > 180 ? 360 - d : d) <= tolerance) return true;
