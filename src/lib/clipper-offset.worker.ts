@@ -1,17 +1,5 @@
-import ClipperLib from "clipper-lib";
 import { squaredEDT, initEDT, detectThinPixels } from "./edt";
-import { simplifyContour } from "./simplify";
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface ShapeData {
-  outer: Point[];
-  holes: Point[][];
-  source?: "image" | "text";
-}
+import { type Point, type ShapeData, thickenShapeClipper } from "./clipper-thicken";
 
 interface BoundsData {
   minX: number; minY: number; maxX: number; maxY: number;
@@ -41,18 +29,6 @@ const DETECT_RESOLUTION = 0.1;
 const RASTER_RESOLUTION = 0.05;
 const MIN_THIN_PIXELS = 20;
 const GAP_CLOSE_FACTOR = 0.14;
-const CLIPPER_SCALE = 1000;
-const MIN_AREA_SQ = 0.01 * CLIPPER_SCALE * CLIPPER_SCALE;
-const ARC_TOLERANCE = 0.1 * CLIPPER_SCALE;
-const SIMPLIFY_TOLERANCE = 0.05;
-
-function toClipperPath(contour: Point[]): ClipperLib.Path {
-  return contour.map((p) => ({ X: Math.round(p.x * CLIPPER_SCALE), Y: Math.round(p.y * CLIPPER_SCALE) }));
-}
-
-function fromClipperPath(path: ClipperLib.Path): Point[] {
-  return path.map((p) => ({ x: p.X / CLIPPER_SCALE, y: p.Y / CLIPPER_SCALE }));
-}
 
 function rasterizeShape(
   shape: ShapeData,
@@ -182,126 +158,6 @@ function emptyThinFeatureMap(stampWidth: number, stampHeight: number): ThinFeatu
   };
 }
 
-function computePathMetrics(path: ClipperLib.Path): { area: number; perimeter: number; halfWidth: number } {
-  const area = Math.abs(ClipperLib.Clipper.Area(path));
-  let perimeter = 0;
-  for (let i = 0; i < path.length; i++) {
-    const j = (i + 1) % path.length;
-    const dx = path[j].X - path[i].X;
-    const dy = path[j].Y - path[i].Y;
-    perimeter += Math.sqrt(dx * dx + dy * dy);
-  }
-  const halfWidth = perimeter > 0 ? area / perimeter / CLIPPER_SCALE : 0;
-  return { area, perimeter, halfWidth };
-}
-
-function thickenShapeClipper(
-  shape: ShapeData,
-  nozzleDiameter: number,
-): ShapeData | null {
-  const maxOffset = nozzleDiameter / 2;
-  let modified = false;
-  let newOuter = shape.outer;
-  const newHoles: Point[][] = [];
-
-  const outerPath = toClipperPath(shape.outer);
-  const outerMetrics = computePathMetrics(outerPath);
-
-  if (outerMetrics.area > MIN_AREA_SQ && outerMetrics.halfWidth < maxOffset) {
-    const expandOffset = maxOffset - outerMetrics.halfWidth;
-    if (expandOffset >= 0.01) {
-      const co = new ClipperLib.ClipperOffset(2, ARC_TOLERANCE);
-      co.AddPath(outerPath, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-      const expanded: ClipperLib.Paths = [];
-      co.Execute(expanded, expandOffset * CLIPPER_SCALE);
-
-      const survived = expanded.filter((p) => Math.abs(ClipperLib.Clipper.Area(p)) > MIN_AREA_SQ);
-      if (survived.length > 0) {
-        const outerPaths: ClipperLib.Paths = [];
-        for (const p of survived) {
-          if (ClipperLib.Clipper.Area(p) > 0) {
-            outerPaths.push(p);
-          } else {
-            newHoles.push(simplifyContour(fromClipperPath(p), SIMPLIFY_TOLERANCE));
-          }
-        }
-
-        let merged: ClipperLib.Paths;
-        if (outerPaths.length > 1) {
-          const clipper = new ClipperLib.Clipper();
-          for (const p of outerPaths) {
-            clipper.AddPath(p, ClipperLib.PolyType.ptSubject, true);
-          }
-          merged = [];
-          clipper.Execute(
-            ClipperLib.ClipType.ctUnion, merged,
-            ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero
-          );
-        } else {
-          merged = outerPaths;
-        }
-
-        let largest: ClipperLib.Path | null = null;
-        let largestArea = 0;
-        for (const p of merged) {
-          const area = ClipperLib.Clipper.Area(p);
-          if (area > MIN_AREA_SQ && area > largestArea) {
-            largest = p;
-            largestArea = area;
-          } else if (area < -MIN_AREA_SQ) {
-            newHoles.push(simplifyContour(fromClipperPath(p), SIMPLIFY_TOLERANCE));
-          }
-        }
-        if (largest) {
-          newOuter = simplifyContour(fromClipperPath(largest), SIMPLIFY_TOLERANCE);
-          modified = true;
-        }
-      }
-    }
-  }
-
-  // Shrink holes inward
-  for (const hole of shape.holes) {
-    const holePath = toClipperPath(hole);
-    const holeMetrics = computePathMetrics(holePath);
-
-    if (holeMetrics.area < MIN_AREA_SQ * 4) {
-      newHoles.push(hole);
-      continue;
-    }
-
-    const cappedOffset = Math.min(maxOffset, holeMetrics.halfWidth * 0.6);
-
-    if (cappedOffset < 0.01) {
-      newHoles.push(hole);
-      continue;
-    }
-
-    const co = new ClipperLib.ClipperOffset(2, ARC_TOLERANCE);
-    co.AddPath(holePath, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-    const shrunk: ClipperLib.Paths = [];
-    co.Execute(shrunk, -cappedOffset * CLIPPER_SCALE);
-
-    const survived = shrunk.filter((p) => Math.abs(ClipperLib.Clipper.Area(p)) > MIN_AREA_SQ);
-
-    if (survived.length === 0) {
-      newHoles.push(hole);
-    } else {
-      for (const p of survived) {
-        if (ClipperLib.Clipper.Area(p) > 0) {
-          p.reverse();
-        }
-        newHoles.push(simplifyContour(fromClipperPath(p), SIMPLIFY_TOLERANCE));
-      }
-      modified = true;
-    }
-  }
-
-  if (!modified) return null;
-
-  return { outer: newOuter, holes: newHoles, source: shape.source };
-}
-
 self.onmessage = (e: MessageEvent<ThickenRequest>) => {
   const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled, smoothEnabled: _smoothEnabled } = e.data;
   const post = self.postMessage.bind(self);
@@ -355,20 +211,33 @@ self.onmessage = (e: MessageEvent<ThickenRequest>) => {
     if (hasThin) {
       post({ type: "progress", progress: 0.4, stage: "Thickening via Clipper offset…" } as ThickenMessage);
 
-      const shapesWithThin: boolean[] = [];
+      const MIN_THIN_PER_SHAPE = 10;
+      const shapeThinInfo: { hasThin: boolean; minHalfWidth: number }[] = [];
       for (const shape of shapes) {
         const sm = rasterizeShape(shape, tctx, gridW, gridH, stampHeight, border);
-        let shapeHasThin = false;
+        let thinCount = 0;
+        let maxSqDistInThin = 0;
         for (let i = 0; i < n; i++) {
-          if (sm[i] && thin[i]) { shapeHasThin = true; break; }
+          if (sm[i] && thin[i]) {
+            thinCount++;
+            if (sqDistToBg[i] > maxSqDistInThin) maxSqDistInThin = sqDistToBg[i];
+          }
         }
-        shapesWithThin.push(shapeHasThin);
+        const minHalfWidth = thinCount > 0
+          ? Math.sqrt(maxSqDistInThin) * RASTER_RESOLUTION
+          : nozzleDiameter;
+        shapeThinInfo.push({
+          hasThin: thinCount >= MIN_THIN_PER_SHAPE,
+          minHalfWidth,
+        });
       }
 
       const thickened: ShapeData[] = [];
       for (let si = 0; si < shapes.length; si++) {
-        if (shapesWithThin[si]) {
-          const result = thickenShapeClipper(shapes[si], nozzleDiameter);
+        if (shapeThinInfo[si].hasThin) {
+          const result = thickenShapeClipper(
+            shapes[si], nozzleDiameter, shapeThinInfo[si].minHalfWidth,
+          );
           if (result) {
             thickened.push(result);
             anyThickened = true;
