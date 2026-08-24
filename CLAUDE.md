@@ -40,7 +40,7 @@ Sources (parallel):                Processing (sequential):           Output:
 - `src/hooks/usePipelineStep.ts` — generic hook that runs any `PipelineStep`
 
 **Geometry output:**
-- `stamp-geometry.ts` takes settings + unified `shapes` → mirrors them → builds `THREE.Group`
+- `stamp-geometry.worker.ts` takes settings + unified `shapes` → mirrors them → builds serialized meshes (assembled into a `THREE.Group` in `StampPreview.tsx`)
 - `clay-geometry.ts` takes the same shapes *unmirrored* → builds inverted impression
 - `stl-export.ts` walks the Three.js scene graph → binary STL blob → browser download
 
@@ -66,7 +66,8 @@ Sources (parallel):                Processing (sequential):           Output:
 - `src/lib/` — pure logic, no React:
   - `image-trace.worker.ts` — bitmap → contour shapes (marching-squares + Douglas-Peucker simplification)
   - `design-data.ts` — `rasterToDesignData()`, `designDataToShapes()`, contour nesting
-  - `stamp-geometry.ts` — builds stamp `THREE.Group` (rounded-rect base, design extrusion, female thread). Contains `mirrorShapes()` and `createRoundedRectShape()`.
+  - `stamp-geometry.worker.ts` — builds the stamp meshes (rounded-rect base, design extrusion, female thread) off the main thread. Contains `mirrorShapes()`; imports the female thread from `thread-geometry.ts`.
+  - `stamp-geometry.ts` — `createRoundedRectShape()`, shared with `clay-geometry.ts`
   - `clay-geometry.ts` — builds clay impression preview (inverted stamp design, unmirrored)
   - `stl-export.ts` — binary STL writer + download helper
   - `font-manager.ts` — loads/caches bundled fonts, converts .ttf/.otf → typeface.js JSON via opentype.js
@@ -86,7 +87,7 @@ Sources (parallel):                Processing (sequential):           Output:
 
 - **All client-side.** No API routes, no server actions. Any new feature must run entirely in the browser.
 - **Units are millimeters.** All geometry dimensions are in mm. STL output is in mm.
-- **Mirroring happens once, in `stamp-geometry.ts`.** Source shapes are always stored unmirrored. The stamp preview shows the mirrored version; the clay impression preview uses the original unmirrored shapes.
+- **Mirroring happens once, in `stamp-geometry.worker.ts`.** Source shapes are always stored unmirrored. The stamp preview shows the mirrored version; the clay impression preview uses the original unmirrored shapes.
 - **Nozzle presets** overwrite `impressionDepth` and `baseThickness` when switched.
 - **Stamp orientation** — impression face on +Z, prints face-up without supports.
 - **Thread config** — all dimensions in `ThreadConfig` (single object in `stamp.ts`). Tolerance (default 0.5mm) shrinks the male thread. Designed for easy iteration after test prints.
