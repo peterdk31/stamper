@@ -154,7 +154,7 @@ function createFemaleThreadGeometry(config: GeometryRequest["threadConfig"]): Bu
     const z = (i / totalZSteps) * height;
     for (let j = 0; j <= segments; j++) {
       const circumAngle = (j / segments) * Math.PI * 2;
-      const helixPhase = z / pitch + circumAngle / (Math.PI * 2);
+      const helixPhase = z / pitch - circumAngle / (Math.PI * 2);
       const profile = threadProfile(helixPhase);
       const distFromEntry = height - z;
       const taper = Math.min(distFromEntry / pitch, 1);
