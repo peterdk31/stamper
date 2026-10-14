@@ -78,6 +78,43 @@ describe("medialThicken — synthetic shapes", () => {
     expect(r.overlay.residual).toBe(false);
   });
 
+  it("keeps the sides of a thickened bar straight and its ends square", () => {
+    const r = run([{ outer: rect(1, 4, 9, 4.2), holes: [] }]);
+    const pts = r.shapes.flatMap((s) => s.outer);
+    const half = TARGET / 2;
+    // Every outline point lies on the widened rectangle: no lumps, no round caps
+    for (const p of pts) {
+      const onSide = Math.abs(Math.abs(p.y - 4.1) - half) < 0.005 && p.x >= 1 - 0.005 && p.x <= 9 + 0.005;
+      const onEnd = (Math.abs(p.x - 1) < 0.005 || Math.abs(p.x - 9) < 0.005) && Math.abs(p.y - 4.1) <= half + 0.005;
+      expect(onSide || onEnd).toBe(true);
+    }
+    // Square corners where the widened sides meet the original ends
+    for (const [x, y] of [[1, 4.1 - half], [9, 4.1 - half], [9, 4.1 + half], [1, 4.1 + half]]) {
+      expect(pts.some((p) => Math.hypot(p.x - x, p.y - y) < 0.005)).toBe(true);
+    }
+  });
+
+  it("widens a bar close to the target evenly along its length", () => {
+    const r = run([{ outer: rect(1, 4, 9, 4.26), holes: [] }]);
+    expect(r.modified).toBe(true);
+    const top = r.shapes.flatMap((s) => s.outer).filter((p) => p.y > 4.13);
+    expect(top.length).toBeGreaterThan(0);
+    for (const p of top) expect(Math.abs(p.y - (4.13 + TARGET / 2))).toBeLessThan(0.005);
+  });
+
+  it("adds no bump where a thin bar meets a thick block", () => {
+    const shapes = [{ outer: [
+      { x: 1, y: 1 }, { x: 5, y: 1 }, { x: 5, y: 4.9 }, { x: 9, y: 4.9 },
+      { x: 9, y: 5.1 }, { x: 5, y: 5.1 }, { x: 5, y: 9 }, { x: 1, y: 9 },
+    ], holes: [] }];
+    const r = run(shapes);
+    expect(residualThin(r.shapes)).toBe(0);
+    // Outside the widened bar, nothing moves past the block's edge
+    for (const p of r.shapes.flatMap((s) => s.outer)) {
+      if (Math.abs(p.y - 5) > TARGET / 2 + 0.005) expect(p.x).toBeLessThanOrEqual(5 + 0.005);
+    }
+  });
+
   it("thickens the thinnest end of a tapered stroke", () => {
     const taper: Point[] = [{ x: 1, y: 5 }, { x: 9, y: 4.95 }, { x: 9, y: 5.25 }, { x: 1, y: 5.05 }];
     const r = run([{ outer: taper, holes: [] }]);

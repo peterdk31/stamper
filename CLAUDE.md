@@ -79,7 +79,7 @@ Sources (parallel):                Processing (sequential):           Output:
   - `simplify.ts` — Douglas-Peucker contour simplification
   - `potrace-trace.ts` — Potrace-style tracer core (optimal polygon + vertex adjustment), used by `potrace.worker.ts`
   - `curve-fit.ts` — Potrace curve fitting: polygon → Bézier curves that keep sharp corners and don't shrink the shape. Applied by both tracers; there is no separate smoothing step.
-  - `medial-thicken.ts` — default thickener: grows every stroke thinner than the slicer's min perimeter width (`minPerimeterWidthPct` of nozzle) from its medial axis, unions with the original outline, and builds the widened/rescued overlay. Pure functions, tested in `__tests__/medial-thicken.test.ts`.
+  - `medial-thicken.ts` — default thickener: widens every stroke thinner than the slicer's min perimeter width (`minPerimeterWidthPct` of nozzle) by pushing its outline edges straight outward (straight sides stay straight, square ends stay square), fills junction notches from a disc-grown fallback, rounds sharp tips, and builds the widened/rescued overlay. Pure functions, tested in `__tests__/medial-thicken.test.ts`.
 - `src/components/` — React UI panels:
   - `StampPreview.tsx` — side-by-side stamp + clay impression canvases, export buttons. Loaded with `next/dynamic` (SSR disabled).
   - `StampSettingsPanel.tsx` — stamp dimensions, nozzle preset, design mode, corner radius, handle mount toggle + thread settings

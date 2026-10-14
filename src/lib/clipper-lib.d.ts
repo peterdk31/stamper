@@ -62,6 +62,7 @@ declare module "clipper-lib" {
     ): boolean;
     static Area(poly: Path): number;
     static Orientation(poly: Path): boolean;
+    static SimplifyPolygon(poly: Path, fillType: number): Paths;
   }
 
   class ClipperOffset {

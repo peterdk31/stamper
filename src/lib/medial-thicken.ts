@@ -10,10 +10,13 @@
  *   2. Find ridge pixels (the discrete medial axis) whose local width is
  *      below the target. Corners of wide regions are excluded — the slicer
  *      prints those fine.
- *   3. Grow a disc of radius targetWidth/2 around every thin ridge pixel,
- *      so each thin stroke becomes exactly target-wide wherever it is thin.
- *   4. Trace the grown region back to polygons and union it with the
- *      original vector outline, which keeps all untouched edges exact.
+ *   3. Push every outline edge near a thin ridge straight outward by half
+ *      the shortfall between its thickness (measured along the edge's
+ *      normal) and the target, so each thin stroke becomes exactly
+ *      target-wide. Edges keep their shape: straight sides stay straight
+ *      and stroke ends stay square.
+ *   4. Union the pushed edges with the original vector outline, which keeps
+ *      all untouched edges exact.
  *
  * Also produces an overlay classifying every thin feature as "widened"
  * (between min feature size and target width — Arachne would widen it too)
@@ -62,6 +65,20 @@ const VERIFY_TOL_PX = 1.0; // raster round-trip tolerance when checking the resu
 const RESIDUAL_MIN_PIXELS = 3; // ignore single-pixel raster noise in the check
 const INPUT_SIMPLIFY_MM = 0.002; // Douglas-Peucker tolerance for incoming outlines
 const MAX_PASSES = 3; // grow passes; later passes only fill necks between merged strokes
+const MIN_GROWTH = 0.002; // mm — smaller edge pushes are skipped as measurement noise
+const GROW_REACH = 3; // edge points within this × rPx of a thin ridge may grow
+const RIDGE_SNAP_PX = 2; // search radius around an inscribed disc's center for its ridge pixel
+const JUNCTION_WIDTH_GAP_PX = 1.5; // disc wider than the ridge by this reaches into a junction
+const TIP_SLOPE = Math.tan((20 * Math.PI) / 180); // sides converging faster than 20° form a tip…
+const TIP_MIN_EDGE_STEPS = 4; // tips are checked on edges at least this many samples long; curves bend too fast to tell
+const TIP_DISC_SLOPE = Math.tan((10 * Math.PI) / 180); // …if the inscribed disc shrinks with them
+const FLAT_END_MIN = 0.8; // flat stroke ends span 0.8–1.25 × the stroke width
+const FLAT_END_MAX = 1.25;
+const DISC_BIAS_PX = 1.5; // how much wider the traced disc growth comes out than the target, per side
+const ON_EDGE_MM = 0.003; // a disc piece's edge within this of a pushed edge lies on it (Clipper rounds to 0.001)
+const NOTCH_SHARED_MIN = 0.6; // disc pieces with at least this share of their outline on pushed edges fill a notch
+const BRIDGE_TARGETS = 3; // ungrown stretches up to this × target width between grown ones are bridged
+const MITER_LIMIT = 2; // × growth — sharper convex corners are bevelled instead
 
 const WIDENED_COLOR = [217, 119, 6];
 const RESCUED_COLOR = [220, 38, 38];
@@ -175,11 +192,13 @@ export function findThinRidges(mask: Uint8Array, w: number, h: number, rPx: numb
   const n = w * h;
   const distSq = squaredEDT(initEDT(mask, n, false), w, h);
 
-  const rSq = rPx * rPx;
+  // Wide enough within the tolerance counts as wide: a stroke exactly at the
+  // target must still have a core, or its corners would read as thin
+  const coreSq = Math.min(rPx, rPx - tolPx + 0.5) ** 2;
   const core = new Uint8Array(n);
   let hasCore = false;
   for (let i = 0; i < n; i++) {
-    if (mask[i] && distSq[i] >= rSq) { core[i] = 1; hasCore = true; }
+    if (mask[i] && distSq[i] >= coreSq) { core[i] = 1; hasCore = true; }
   }
   const coreDistSq = hasCore ? squaredEDT(initEDT(core, n, true), w, h) : null;
 
@@ -247,7 +266,7 @@ function neighborhoodMaxWidth(ridges: ThinRidges, w: number, h: number, radiusPx
 }
 
 // ---------------------------------------------------------------------------
-// Grown region → polygons
+// Edge growth
 // ---------------------------------------------------------------------------
 
 /** Squared pixel distance to the nearest of the given seed pixels (INF if none). */
@@ -256,6 +275,24 @@ function distSqToSeeds(seeds: number[], w: number, h: number): Float32Array {
   const seedMask = new Uint8Array(n);
   for (const i of seeds) seedMask[i] = 1;
   return squaredEDT(initEDT(seedMask, n, true), w, h);
+}
+
+function minDistSq(a: Float32Array | null, b: Float32Array | null, n: number): Float32Array {
+  if (!a) return b!;
+  if (!b) return a;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = Math.min(a[i], b[i]);
+  return out;
+}
+
+function simplifyClosed(loop: Point[], tolerance: number): Point[] {
+  return simplifyContour([...loop, loop[0]], tolerance).slice(0, -1);
+}
+
+function signedArea(p: Point[]): number {
+  let a = 0;
+  for (let i = p.length - 1, j = 0; j < p.length; i = j++) a += p[i].x * p[j].y - p[j].x * p[i].y;
+  return a / 2;
 }
 
 /**
@@ -330,24 +367,447 @@ export function traceIsoContours(field: Float32Array, w: number, h: number): Poi
   return loops;
 }
 
-function minDistSq(a: Float32Array | null, b: Float32Array | null, n: number): Float32Array {
-  if (!a) return b!;
-  if (!b) return a;
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = Math.min(a[i], b[i]);
-  return out;
-}
-
-function simplifyClosed(loop: Point[], tolerance: number): Point[] {
-  return simplifyContour([...loop, loop[0]], tolerance).slice(0, -1);
-}
-
 /** Polygons (mm) of the region where field > 0. */
 function traceField(field: Float32Array, grid: Grid): Point[][] {
   const { w, h, res } = grid;
   return traceIsoContours(field, w, h)
     .map((loop) => simplifyClosed(loop.map((p) => ({ x: grid.x0 + p.x * res, y: grid.y0 + p.y * res })), res * 0.25))
     .filter((loop) => loop.length >= 3);
+}
+
+interface Edge { ax: number; ay: number; bx: number; by: number }
+
+/** Uniform-grid bucket index of edges, for short ray and disc queries against the outline. */
+class EdgeIndex {
+  private cells = new Map<number, number[]>();
+  private seen: Int32Array;
+  private queryId = 0;
+
+  constructor(private edges: Edge[], private cell: number) {
+    this.seen = new Int32Array(edges.length);
+    edges.forEach((e, k) => {
+      const x1 = this.ix(Math.max(e.ax, e.bx)), y1 = this.ix(Math.max(e.ay, e.by));
+      for (let y = this.ix(Math.min(e.ay, e.by)); y <= y1; y++) {
+        for (let x = this.ix(Math.min(e.ax, e.bx)); x <= x1; x++) {
+          const key = this.key(x, y);
+          let list = this.cells.get(key);
+          if (!list) { list = []; this.cells.set(key, list); }
+          list.push(k);
+        }
+      }
+    });
+  }
+
+  private ix(v: number): number { return Math.floor(v / this.cell); }
+  private key(x: number, y: number): number { return (x + 32768) * 65536 + (y + 32768); }
+
+  /** Calls fn for every edge (other than those in `skip`) whose cell overlaps the box, each once. Stops when fn returns false. */
+  private each(x0: number, y0: number, x1: number, y1: number, skip: number | number[], fn: (e: Edge) => boolean): void {
+    const skips = (k: number) => (typeof skip === "number" ? k === skip : skip.includes(k));
+    const id = ++this.queryId;
+    const cx1 = this.ix(x1), cy1 = this.ix(y1);
+    for (let y = this.ix(y0); y <= cy1; y++) {
+      for (let x = this.ix(x0); x <= cx1; x++) {
+        const list = this.cells.get(this.key(x, y));
+        if (!list) continue;
+        for (const k of list) {
+          if (this.seen[k] === id || skips(k)) continue;
+          this.seen[k] = id;
+          if (!fn(this.edges[k])) return;
+        }
+      }
+    }
+  }
+
+  /** Distance from p to the nearest edge, or Infinity if none is within maxR. */
+  nearestDist(px: number, py: number, maxR: number): number {
+    let bestSq = maxR * maxR;
+    this.each(px - maxR, py - maxR, px + maxR, py + maxR, -1, (e) => {
+      const ex = e.bx - e.ax, ey = e.by - e.ay;
+      const lenSq = ex * ex + ey * ey;
+      const u = lenSq > 0 ? Math.min(1, Math.max(0, ((px - e.ax) * ex + (py - e.ay) * ey) / lenSq)) : 0;
+      const ox = e.ax + ex * u - px, oy = e.ay + ey * u - py;
+      bestSq = Math.min(bestSq, ox * ox + oy * oy);
+      return true;
+    });
+    return bestSq < maxR * maxR ? Math.sqrt(bestSq) : Infinity;
+  }
+
+  /** Whether any edge passes within eps of p. */
+  near(px: number, py: number, eps: number): boolean {
+    let found = false;
+    const epsSq = eps * eps;
+    this.each(px - eps, py - eps, px + eps, py + eps, -1, (e) => {
+      const ex = e.bx - e.ax, ey = e.by - e.ay;
+      const lenSq = ex * ex + ey * ey;
+      const u = lenSq > 0 ? Math.min(1, Math.max(0, ((px - e.ax) * ex + (py - e.ay) * ey) / lenSq)) : 0;
+      const ox = e.ax + ex * u - px, oy = e.ay + ey * u - py;
+      found = ox * ox + oy * oy <= epsSq;
+      return !found;
+    });
+    return found;
+  }
+
+  /** Distance from p along unit direction d to the nearest edge crossing (other than `skip`), or Infinity beyond maxT. */
+  cast(px: number, py: number, dx: number, dy: number, maxT: number, skip: number): number {
+    const qx = px + dx * maxT, qy = py + dy * maxT;
+    let best = Infinity;
+    this.each(Math.min(px, qx), Math.min(py, qy), Math.max(px, qx), Math.max(py, qy), skip, (e) => {
+      const ex = e.bx - e.ax, ey = e.by - e.ay;
+      const denom = dx * ey - dy * ex;
+      if (Math.abs(denom) < 1e-12) return true;
+      const wx = e.ax - px, wy = e.ay - py;
+      const t = (wx * ey - wy * ex) / denom;
+      const u = (wx * dy - wy * dx) / denom;
+      if (t > 1e-9 && t < best && u >= 0 && u <= 1) best = t;
+      return true;
+    });
+    return best <= maxT ? best : Infinity;
+  }
+
+  /**
+   * Radius of the largest disc that touches the outline at p, centered along
+   * unit direction d, and crosses no edge other than those in `skip` (capped at maxR).
+   */
+  discRadius(px: number, py: number, dx: number, dy: number, maxR: number, skip: number | number[]): number {
+    // The disc centered at p + d·t with radius t grows until it first touches
+    // an edge, either along the edge's line or at one of its endpoints.
+    let best = maxR;
+    const touchPoint = (qx: number, qy: number) => {
+      const wx = px - qx, wy = py - qy;
+      const wd = wx * dx + wy * dy;
+      if (wd >= 0) return; // the disc grows away from it
+      const t = -(wx * wx + wy * wy) / (2 * wd);
+      if (t > 1e-9 && t < best) best = t;
+    };
+    this.each(px - 2 * maxR, py - 2 * maxR, px + 2 * maxR, py + 2 * maxR, skip, (e) => {
+      const ex = e.bx - e.ax, ey = e.by - e.ay;
+      const len = Math.hypot(ex, ey);
+      if (len > 0) {
+        const mx = -ey / len, my = ex / len;
+        const f0 = (px - e.ax) * mx + (py - e.ay) * my, dm = dx * mx + dy * my;
+        // Signed distance from the center to the line is f0 + t·dm; it touches when that is ±t
+        for (const t of [f0 / (1 - dm), -f0 / (1 + dm)]) {
+          if (!(t > 1e-9 && t < best)) continue;
+          const cx = px + dx * t, cy = py + dy * t;
+          const u = ((cx - e.ax) * ex + (cy - e.ay) * ey) / (len * len);
+          if (u >= 0 && u <= 1) best = t;
+        }
+      }
+      touchPoint(e.ax, e.ay);
+      touchPoint(e.bx, e.by);
+      return true;
+    });
+    return best;
+  }
+}
+
+/** Stroke widths (px) at medial-axis pixels; looked up to size the growth of the outline they belong to. */
+interface RidgeWidths {
+  grid: Grid;
+  widthPx: Float32Array; // 0 off the ridge
+}
+
+/** Widest ridge within snapPx of a point (mm), in mm, or 0 if there is none. */
+function ridgeWidthNear(ridges: RidgeWidths, x: number, y: number, snapPx: number): number {
+  const { grid, widthPx } = ridges;
+  const gx = Math.round((x - grid.x0) / grid.res), gy = Math.round((y - grid.y0) / grid.res);
+  let best = 0;
+  for (let dy = -snapPx; dy <= snapPx; dy++) {
+    const yy = gy + dy;
+    if (yy < 0 || yy >= grid.h) continue;
+    for (let dx = -snapPx; dx <= snapPx; dx++) {
+      const xx = gx + dx;
+      if (xx < 0 || xx >= grid.w) continue;
+      const v = widthPx[yy * grid.w + xx];
+      if (v > best) best = v;
+    }
+  }
+  return best * grid.res;
+}
+
+/**
+ * Fills runs of ungrown samples (at most maxRun long) between grown ones on
+ * the same straight edge by interpolating, so the edge stays one straight
+ * line — e.g. a serif's base, which is only thin either side of the stem.
+ */
+function bridgeGaps(grow: Float64Array, maxRun: number): void {
+  let last = -1;
+  for (let i = 0; i < grow.length; i++) {
+    if (grow[i] <= MIN_GROWTH) continue;
+    if (last >= 0 && i - last > 1 && i - last - 1 <= maxRun) {
+      for (let j = last + 1; j < i; j++) grow[j] = grow[last] + ((grow[i] - grow[last]) * (j - last)) / (i - last);
+    }
+    last = i;
+  }
+}
+
+/** Width (mm) of the first thin ridge met walking from p along d, up to the disc's center; 0 if none. */
+function firstRidgeInward(ridges: RidgeWidths, px: number, py: number, dx: number, dy: number, disc: number): number {
+  const res = ridges.grid.res;
+  for (let t = 0; ; t = Math.min(disc, t + res)) {
+    const width = ridgeWidthNear(ridges, px + dx * t, py + dy * t, 1);
+    if (width > 0) return width;
+    if (t >= disc) return ridgeWidthNear(ridges, px + dx * disc, py + dy * disc, RIDGE_SNAP_PX);
+  }
+}
+
+/**
+ * Loops that push the edges of too-thin strokes straight outward until each
+ * stroke is targetWidth across. Edges keep their shape, so straight sides
+ * stay straight and stroke ends keep their outline.
+ *
+ * How much an edge point grows depends on the stroke it belongs to:
+ *  - Long straight edges (at least as long as the stroke is wide) measure
+ *    the material straight across along their normal. That is the stroke
+ *    width for a side, but long for a flat stroke end, so ends stay square
+ *    and don't get longer.
+ *  - Short edges (curves) take the width of the medial ridge their
+ *    inscribed disc is centered on. Round caps grow into round caps of the
+ *    target width, and outline points near a corner grow like the rest of
+ *    their stroke instead of bulging.
+ * Edge points that aren't near a thin ridge never grow, so wide regions —
+ * including their sharp corners, which print fine — keep their exact edges.
+ */
+function edgeGrowthLoops(
+  shapes: ShapeData[], targetWidth: number, grid: Grid, ridgePixels: number[], nearRidge: (x: number, y: number) => boolean,
+): Point[][] {
+  const step = grid.res;
+  const rings: { pts: Point[]; sign: number }[] = [];
+  for (const s of shapes) {
+    rings.push({ pts: s.outer, sign: signedArea(s.outer) > 0 ? 1 : -1 });
+    for (const hl of s.holes) rings.push({ pts: hl, sign: signedArea(hl) > 0 ? -1 : 1 });
+  }
+  const edges: Edge[] = [];
+  for (const { pts } of rings) {
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[k], b = pts[(k + 1) % pts.length];
+      edges.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
+    }
+  }
+  const index = new EdgeIndex(edges, targetWidth);
+  const half = targetWidth / 2;
+  const loops: Point[][] = [];
+
+  // The raster only says where the ridge is; its width comes from the outline
+  // itself (raster widths are off by up to ~2 px). Each pixel then takes the
+  // widest ridge around it, so short branches into corners report the stroke.
+  const exact: ThinRidges = { indices: ridgePixels, widthsPx: ridgePixels.map((i) => {
+    const gx = i % grid.w, gy = (i - gx) / grid.w;
+    const d = index.nearestDist(grid.x0 + gx * grid.res, grid.y0 + gy * grid.res, targetWidth);
+    return d === Infinity ? 0 : (2 * d) / grid.res;
+  }) };
+  const ridges: RidgeWidths = { grid, widthPx: neighborhoodMaxWidth(exact, grid.w, grid.h, half / grid.res) };
+
+  // Sides converging faster than a taper form a sharp tip: pushing them out
+  // only moves the tip, so it's left to the rounding pass. Both the width
+  // across and the inscribed disc shrink there — unlike a round cap (disc
+  // constant) or the outer corner of a bend (width across constant).
+  const isTipAt = (a: Point, dx: number, dy: number, len: number, t: number, nxk: number, nyk: number, edgeId: number) => {
+    const t0 = Math.max(0, t - step / 2 / len), t1 = Math.min(1, t + step / 2 / len);
+    const span = (t1 - t0) * len;
+    if (span < 1e-6) return false;
+    const ax = a.x + dx * t0, ay = a.y + dy * t0, bx = a.x + dx * t1, by = a.y + dy * t1;
+    const c0 = index.cast(ax, ay, -nxk, -nyk, targetWidth, edgeId), c1 = index.cast(bx, by, -nxk, -nyk, targetWidth, edgeId);
+    if (!Number.isFinite(c0) || !Number.isFinite(c1) || Math.abs(c1 - c0) <= TIP_SLOPE * span) return false;
+    // A tip narrows steadily; a jump in width (the far side changing at a junction) is not one
+    const tm = (t0 + t1) / 2;
+    const cm = index.cast(a.x + dx * tm, a.y + dy * tm, -nxk, -nyk, targetWidth, edgeId);
+    if (!Number.isFinite(cm) || Math.abs(cm - (c0 + c1) / 2) > 0.25 * Math.abs(c1 - c0)) return false;
+    const d0 = index.discRadius(ax, ay, -nxk, -nyk, half, edgeId), d1 = index.discRadius(bx, by, -nxk, -nyk, half, edgeId);
+    return Math.abs(d1 - d0) > TIP_DISC_SLOPE * span;
+  };
+
+  let edgeBase = 0;
+  for (const { pts, sign } of rings) {
+    const n = pts.length;
+    // Per edge: outward normal (away from the material) and growth at both ends
+    const nx = new Float64Array(n), ny = new Float64Array(n);
+    const startGrow = new Float64Array(n), endGrow = new Float64Array(n);
+    const pushedEdge: (Point[] | null)[] = new Array(n).fill(null);
+    for (let k = 0; k < n; k++) {
+      const a = pts[k], b = pts[(k + 1) % n];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 1e-9) continue;
+      nx[k] = (sign * (b.y - a.y)) / len;
+      ny[k] = (-sign * (b.x - a.x)) / len;
+    }
+    // Vertex k (between edges k−1 and k) is convex when edge k turns away from edge k−1's normal
+    const convex = (k: number) => {
+      const prev = (k + n - 1) % n, v = pts[k], next = pts[(k + 1) % n];
+      return nx[prev] * (next.x - v.x) + ny[prev] * (next.y - v.y) < 0;
+    };
+    for (let k = 0; k < n; k++) {
+      const a = pts[k], b = pts[(k + 1) % n];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) continue;
+      const edgeId = edgeBase + k;
+      // Near a convex corner the disc would be cut off by the edge round the
+      // corner and measure the corner instead of the stroke, so those
+      // neighbours don't count. (At a sharp tip the disc then doesn't shrink
+      // either, which leaves tips to the rounding pass.)
+      const skip = [edgeId];
+      if (convex(k)) skip.push(edgeBase + (k + n - 1) % n);
+      if (convex((k + 1) % n)) skip.push(edgeBase + (k + 1) % n);
+
+      const inward = (x: number, y: number) => index.discRadius(x, y, -nx[k], -ny[k], half, skip);
+      const across = (x: number, y: number) => index.cast(x, y, -nx[k], -ny[k], targetWidth, edgeId);
+      // A flat stroke end spans the stroke's width and faces along the stroke
+      const midDisc = index.discRadius(a.x + dx / 2, a.y + dy / 2, -nx[k], -ny[k], half, edgeId);
+      const flatEnd = len >= 2 * midDisc * FLAT_END_MIN && len <= 2 * midDisc * FLAT_END_MAX
+        && across(a.x + dx / 2, a.y + dy / 2) === Infinity;
+
+      const m = Math.max(1, Math.ceil(len / step));
+      const grow = new Float64Array(m);
+      let any = false;
+      for (let i = 0; i < m && !flatEnd; i++) {
+        const t = (i + 0.5) / m;
+        const px = a.x + dx * t, py = a.y + dy * t;
+        if (!nearRidge(px, py)) continue;
+        const disc = inward(px, py);
+        // The disc is exact, but near a junction it reaches into the junction;
+        // the stroke's own ridge, first met walking inward, knows its width.
+        // Where the ridge is dropped altogether (the junction counts as wide),
+        // the width straight across still measures the stroke.
+        const ridge = firstRidgeInward(ridges, px, py, -nx[k], -ny[k], disc);
+        const width = ridge === 0 ? across(px, py)
+          : ridge < 2 * disc - JUNCTION_WIDTH_GAP_PX * ridges.grid.res ? ridge : 2 * disc;
+        if (width >= targetWidth) continue;
+        if (len >= TIP_MIN_EDGE_STEPS * step && isTipAt(a, dx, dy, len, t, nx[k], ny[k], edgeId)) continue;
+        grow[i] = half - width / 2;
+        if (grow[i] > MIN_GROWTH) any = true;
+      }
+      if (any) bridgeGaps(grow, Math.floor((BRIDGE_TARGETS * targetWidth) / (len / m)));
+      startGrow[k] = grow[0];
+      endGrow[k] = grow[m - 1];
+      if (!any) continue;
+
+      // The pushed edge: its two corners and every sample, moved out along the normal
+      const out: Point[] = [{ x: a.x + nx[k] * grow[0], y: a.y + ny[k] * grow[0] }];
+      for (let i = 0; i < m; i++) {
+        const t = (i + 0.5) / m;
+        out.push({ x: a.x + dx * t + nx[k] * grow[i], y: a.y + dy * t + ny[k] * grow[i] });
+      }
+      out.push({ x: b.x + nx[k] * grow[m - 1], y: b.y + ny[k] * grow[m - 1] });
+      pushedEdge[k] = out;
+    }
+
+    // Outward corner between the pushed edges k−1 and k at vertex k: the miter
+    // point, or none (a bevel) when the miter would spike
+    const miterAt = (k: number): Point | null => {
+      const prev = (k + n - 1) % n, v = pts[k];
+      const g0 = endGrow[prev], g1 = startGrow[k];
+      const det = nx[prev] * ny[k] - ny[prev] * nx[k];
+      if (Math.abs(det) <= 1e-9) return null;
+      const mx = (g0 * ny[k] - g1 * ny[prev]) / det, my = (g1 * nx[prev] - g0 * nx[k]) / det;
+      return Math.hypot(mx, my) <= MITER_LIMIT * Math.max(g0, g1) ? { x: v.x + mx, y: v.y + my } : null;
+    };
+    // Joins at vertices where a run of pushed edges starts or ends (or a run
+    // wraps the whole ring), as separate triangles: one quad could twist into
+    // a bow-tie whose reversed lobe would cancel the strip next to it
+    const join = (k: number) => {
+      const prev = (k + n - 1) % n, v = pts[k];
+      if ((endGrow[prev] <= MIN_GROWTH && startGrow[k] <= MIN_GROWTH) || !convex(k)) return;
+      const p0 = { x: v.x + nx[prev] * endGrow[prev], y: v.y + ny[prev] * endGrow[prev] };
+      const p1 = { x: v.x + nx[k] * startGrow[k], y: v.y + ny[k] * startGrow[k] };
+      const miter = miterAt(k);
+      const tris = miter ? [[v, p0, miter], [v, miter, p1]] : [[v, p0, p1]];
+      for (const tri of tris) loops.push(signedArea(tri) < 0 ? tri.reverse() : tri);
+    };
+
+    // Each run of consecutive pushed edges becomes one band: the ring along
+    // the run, then back along the pushed edges with the corners between them
+    // (miter at outward corners, the ring vertex itself at inward ones).
+    // Far fewer, larger polygons keep the final union fast.
+    const pushedCount = pushedEdge.filter(Boolean).length;
+    if (pushedCount > 0) {
+      let start = 0;
+      if (pushedCount < n) {
+        while (!pushedEdge[start]) start++;
+        while (pushedEdge[(start + n - 1) % n]) start = (start + n - 1) % n; // back up to the run's first edge
+      }
+      for (let i = 0; i < n; ) {
+        const k0 = (start + i) % n;
+        if (!pushedEdge[k0]) { i++; continue; }
+        let len = 0;
+        while (i + len < n && pushedEdge[(start + i + len) % n]) len++;
+        const band: Point[] = [];
+        for (let j = 0; j <= len; j++) band.push(pts[(k0 + j) % n]);
+        for (let j = len - 1; j >= 0; j--) {
+          const k = (k0 + j) % n;
+          band.push(...pushedEdge[k]!.slice().reverse());
+          if (j > 0) {
+            if (convex(k)) {
+              const miter = miterAt(k);
+              if (miter) band.push(miter);
+            } else {
+              band.push(pts[k]);
+            }
+          }
+        }
+        // Samples along straight or gently curved stretches are redundant once
+        // pushed; inward corners can make the band cross itself, resolved per band
+        const thinned = simplifyClosed(band, INPUT_SIMPLIFY_MM);
+        const simple = ClipperLib.Clipper.SimplifyPolygon(toClipperPath(thinned), ClipperLib.PolyFillType.pftNonZero);
+        for (const path of simple) loops.push(fromClipperPath(path));
+        join(k0);
+        join((k0 + len) % n);
+        i += len;
+      }
+    }
+    edgeBase += n;
+  }
+  return loops;
+}
+
+/**
+ * The parts of the disc-grown region (`discLoops`, traced contours) that fill
+ * notches in the edge-pushed shapes, as nested contours (inner loops are holes).
+ *
+ * Pushing edges leaves wedge-shaped notches where strokes meet at a junction;
+ * growing discs around the ridges fills those, but also rounds stroke ends
+ * and bulges out where a stroke is barely thin. Every piece the discs add
+ * beyond the pushed shapes is one or the other: a notch filler is tucked in
+ * between pushed edges, so most of its outline lies on them, while a bulge
+ * sits on the outside and shares only its base. Only notch fillers are kept.
+ */
+function junctionFill(pushed: ShapeData[], discLoops: Point[][], targetWidth: number): Point[][] {
+  const pushedPaths: ClipperLib.Paths = [];
+  const edges: Edge[] = [];
+  for (const s of pushed) {
+    for (const ring of [s.outer, ...s.holes]) {
+      if (ring.length < 3) continue;
+      pushedPaths.push(toClipperPath(ring));
+      for (let k = 0; k < ring.length; k++) {
+        const a = ring[k], b = ring[(k + 1) % ring.length];
+        edges.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
+      }
+    }
+  }
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(normalizeEvenOdd(discLoops.map(toClipperPath)), ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(pushedPaths, ClipperLib.PolyType.ptClip, true);
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctDifference, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftEvenOdd);
+  const pieces: ShapeData[] = [];
+  polyTreeToShapes(tree, pieces);
+
+  const index = new EdgeIndex(edges, targetWidth);
+  const fill: Point[][] = [];
+  for (const piece of pieces) {
+    let shared = 0, total = 0;
+    for (const ring of [piece.outer, ...piece.holes]) {
+      for (let k = 0; k < ring.length; k++) {
+        const a = ring[k], b = ring[(k + 1) % ring.length];
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        total += len;
+        if (index.near((a.x + b.x) / 2, (a.y + b.y) / 2, ON_EDGE_MM)) shared += len;
+      }
+    }
+    if (total > 0 && shared / total >= NOTCH_SHARED_MIN) fill.push(piece.outer, ...piece.holes);
+  }
+  return fill;
 }
 
 /** Background pixels filled by a morphological closing with the given radius. */
@@ -385,14 +845,27 @@ function polyTreeToShapes(node: ClipperLib.PolyNode, out: ShapeData[]): void {
   }
 }
 
-/** Union of the shapes and the added loops. */
-function unionWith(shapes: ShapeData[], loops: Point[][]): ShapeData[] {
+/**
+ * Union of the shapes and the added loops. How the loops are read:
+ *  - "solid": each loop counts as solid, whatever its direction; loops may overlap.
+ *  - "nested": traced contours whose inner loops are holes.
+ *  - "oriented": simple loops whose direction already says outer (counter-clockwise) or hole.
+ */
+function unionWith(shapes: ShapeData[], loops: Point[][], mode: "solid" | "nested" | "oriented" = "solid"): ShapeData[] {
   const subject: ClipperLib.Paths = [];
   for (const s of shapes) {
     if (s.outer.length < 3) continue;
     subject.push(...normalizeEvenOdd([s.outer, ...s.holes].filter((c) => c.length >= 3).map(toClipperPath)));
   }
-  subject.push(...normalizeEvenOdd(loops.map(toClipperPath)));
+  if (mode === "nested") {
+    subject.push(...normalizeEvenOdd(loops.map(toClipperPath)));
+  } else {
+    for (const loop of loops) {
+      const path = toClipperPath(loop);
+      if (mode === "solid" && ClipperLib.Clipper.Area(path) < 0) path.reverse();
+      subject.push(path);
+    }
+  }
 
   const c = new ClipperLib.Clipper();
   c.AddPaths(subject, ClipperLib.PolyType.ptSubject, true);
@@ -503,29 +976,47 @@ export function medialThicken(
     };
   }
 
-  // Grow discs around the thin ridges, merge, and re-check. Strokes that grow
-  // into each other can leave thin necks where they barely touch; later
-  // passes grow those the same way. Gaps narrower than the min feature size
-  // are closed by the slicer, so the check treats them as filled — otherwise
-  // the material between two hairline slits would look like a thin web.
+  // Push the edges of thin strokes outward, merge, and re-check. Strokes that
+  // grow into each other can leave thin necks where they barely touch, and
+  // tips sharper than a printable corner stay thin; later passes round those
+  // off with a disc of the target width. Gaps narrower than the min feature
+  // size are closed by the slicer, so the check treats them as filled —
+  // otherwise the material between two hairline slits would look like a thin web.
   const gapPx = minFeatureSize / 2 / res;
   const n = w * h;
   // Curve outlines (e.g. glyphs) arrive far denser than needed; thinning them
-  // keeps the Clipper unions fast without visibly moving any edge.
-  let merged = shapes
+  // keeps the Clipper unions fast without visibly moving any edge. The union
+  // up front keeps overlapping sources from measuring as thin crossings.
+  let merged = unionWith(shapes
     .filter((s) => s.outer.length >= 3)
     .map((s) => ({
       outer: simplifyClosed(s.outer, INPUT_SIMPLIFY_MM),
       holes: s.holes.filter((hl) => hl.length >= 3).map((hl) => simplifyClosed(hl, INPUT_SIMPLIFY_MM)),
-    }));
-  let growDistSq = minDistSq(rescuedDist, widenedDist, n);
+    })), []);
   let residualIndices: number[] = [];
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     const passProgress = 0.45 + (0.45 * pass) / MAX_PASSES;
-    progress(passProgress, pass === 0 ? "Growing thin features…" : "Filling necks…");
-    const field = new Float32Array(n);
-    for (let i = 0; i < n; i++) field[i] = rPx - Math.sqrt(growDistSq[i]);
-    merged = unionWith(merged, traceField(field, grid));
+    if (pass === 0) {
+      progress(passProgress, "Growing thin features…");
+      const seedDist = minDistSq(rescuedDist, widenedDist, n);
+      const nearSeedSq = (rPx * GROW_REACH) ** 2;
+      const nearRidge = (x: number, y: number) => {
+        const gx = Math.round((x - grid.x0) / res), gy = Math.round((y - grid.y0) / res);
+        return gx >= 0 && gy >= 0 && gx < w && gy < h && seedDist[gy * w + gx] <= nearSeedSq;
+      };
+      const pushed = unionWith(merged, edgeGrowthLoops(merged, targetWidth, grid, ridges.indices, nearRidge), "oriented");
+      // Discs around a ridge pixel band trace out ~1.5 px wider than the
+      // target; trimmed so they only stand out where the pushed edges fall short.
+      const field = new Float32Array(n);
+      for (let i = 0; i < n; i++) field[i] = rPx - DISC_BIAS_PX - Math.sqrt(seedDist[i]);
+      merged = unionWith(pushed, junctionFill(pushed, traceField(field, grid), targetWidth), "nested");
+    } else {
+      progress(passProgress, "Filling necks…");
+      const seedDist = distSqToSeeds(residualIndices, w, h);
+      const field = new Float32Array(n);
+      for (let i = 0; i < n; i++) field[i] = rPx - Math.sqrt(seedDist[i]);
+      merged = unionWith(merged, traceField(field, grid), "nested");
+    }
 
     progress(passProgress + 0.25 / MAX_PASSES, "Verifying result…");
     const verifyMask = rasterizeShapes(merged, grid);
@@ -535,7 +1026,6 @@ export function medialThicken(
     }
     residualIndices = findThinRidges(verifyMask, w, h, rPx, VERIFY_TOL_PX).indices;
     if (residualIndices.length === 0) break;
-    growDistSq = distSqToSeeds(residualIndices, w, h);
   }
 
   const residual = residualIndices.length >= RESIDUAL_MIN_PIXELS;
