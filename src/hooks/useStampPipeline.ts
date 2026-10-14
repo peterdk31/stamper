@@ -9,7 +9,6 @@ import { getFontCache } from "@/lib/font-manager";
 import { computeRequiredHeight, computeRequiredWidth } from "@/lib/text-to-shapes";
 import { textToDesignData } from "@/lib/pipeline/text";
 import { mergeDesignData } from "@/lib/pipeline/merge";
-import { smoothStep } from "@/lib/pipeline/smooth";
 import { getTracer, getStepVariant } from "@/lib/pipeline/registry";
 import type { TracerDefinition, ImageAdjustments } from "@/lib/pipeline/tracer-types";
 import type { StepFlags } from "@/lib/pipeline/types";
@@ -27,7 +26,6 @@ export interface PipelineInputs {
   texts: StampText[];
   fontsReady: boolean;
   thickenEnabled: boolean;
-  smoothEnabled: boolean;
   tracerAlgorithm: string;
   thickenAlgorithm: string;
 }
@@ -42,7 +40,6 @@ export interface PipelineOutputs {
   traceProgress: number;
   traceStage: string;
   isThickening: boolean;
-  isSmoothing: boolean;
   isProcessing: boolean;
   pipelineProgress: number;
   pipelineStage: string;
@@ -298,7 +295,7 @@ function useEffectiveSettings(
 // ---------------------------------------------------------------------------
 
 export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
-  const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled, smoothEnabled, tracerAlgorithm, thickenAlgorithm } = inputs;
+  const { settings, setSettings, imageDataUrl, svgText, texts, fontsReady, thickenEnabled, tracerAlgorithm, thickenAlgorithm } = inputs;
 
   // 1. Trace image (produces raw contours, independent of stamp dimensions)
   const tracer = useMemo(() => getTracer(tracerAlgorithm), [tracerAlgorithm]);
@@ -344,14 +341,11 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     return null;
   }, [trace.rawShapes, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData]);
 
-  // 5. Smooth image data (before merge — smoothing should not apply to text)
-  const stepFlags: StepFlags = { thickenEnabled, smoothEnabled, tracerAlgorithm, thickenAlgorithm };
-  const afterSmooth = usePipelineStep(smoothStep, imageData, effectiveSettings, stepFlags);
-
-  // 6. Merge sources (smoothed image + raw text)
+  // 5. Merge sources (image + text)
+  const stepFlags: StepFlags = { thickenEnabled, tracerAlgorithm, thickenAlgorithm };
   const merged = useMemo(
-    () => mergeDesignData(afterSmooth.data, textLayout.textData),
-    [afterSmooth.data, textLayout.textData],
+    () => mergeDesignData(imageData, textLayout.textData),
+    [imageData, textLayout.textData],
   );
 
   // 7. Processing chain (post-merge) — thicken step resolved from registry
@@ -371,19 +365,18 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     [imageData],
   );
 
-  const isProcessing = trace.isTracing || afterThicken.isProcessing || afterSmooth.isProcessing;
+  const isProcessing = trace.isTracing || afterThicken.isProcessing;
 
   // Combined pipeline progress
   const { pipelineProgress, pipelineStage } = useMemo(() => {
     const steps: { active: boolean; progress: number; label: string }[] = [];
     if (trace.isTracing) steps.push({ active: true, progress: trace.traceProgress, label: trace.traceStage || "Tracing…" });
     if (afterThicken.isProcessing) steps.push({ active: true, progress: afterThicken.progress, label: thickenEnabled ? "Thickening…" : "Checking features…" });
-    if (smoothEnabled && merged) steps.push({ active: afterSmooth.isProcessing, progress: afterSmooth.isProcessing ? afterSmooth.progress : 1, label: "Smoothing…" });
     if (steps.length === 0) return { pipelineProgress: 0, pipelineStage: "" };
     const total = steps.reduce((sum, s) => sum + s.progress, 0) / steps.length;
     const current = steps.find((s) => s.active);
     return { pipelineProgress: total, pipelineStage: current?.label ?? "" };
-  }, [trace.isTracing, trace.traceProgress, trace.traceStage, thickenEnabled, smoothEnabled, merged, afterThicken.isProcessing, afterThicken.progress, afterSmooth.isProcessing, afterSmooth.progress]);
+  }, [trace.isTracing, trace.traceProgress, trace.traceStage, thickenEnabled, afterThicken.isProcessing, afterThicken.progress]);
 
   return {
     shapes,
@@ -394,11 +387,10 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
     traceProgress: trace.traceProgress,
     traceStage: trace.traceStage,
     isThickening: afterThicken.isProcessing,
-    isSmoothing: afterSmooth.isProcessing,
     isProcessing,
     pipelineProgress,
     pipelineStage,
-    hasDesign: rawDesignShapes.length > 0,
+    hasDesign: (merged?.shapes.length ?? 0) > 0,
     sourceAspectRatio: trace.sourceAspectRatio,
   };
 }

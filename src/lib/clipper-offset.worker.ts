@@ -11,7 +11,6 @@ interface ThickenRequest {
   stampHeight: number;
   nozzleDiameter: number;
   thickenEnabled: boolean;
-  smoothEnabled: boolean;
 }
 
 interface ThinFeatureMapData {
@@ -159,7 +158,7 @@ function emptyThinFeatureMap(stampWidth: number, stampHeight: number): ThinFeatu
 }
 
 self.onmessage = (e: MessageEvent<ThickenRequest>) => {
-  const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled, smoothEnabled: _smoothEnabled } = e.data;
+  const { shapes, stampWidth, stampHeight, nozzleDiameter, thickenEnabled } = e.data;
   const post = self.postMessage.bind(self);
 
   post({ type: "progress", progress: 0, stage: "Rasterizing…" } as ThickenMessage);

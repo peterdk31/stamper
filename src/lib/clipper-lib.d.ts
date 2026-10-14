@@ -40,13 +40,23 @@ declare module "clipper-lib" {
     etClosedPolygon: 4;
   };
 
+  class PolyNode {
+    Contour(): Path;
+    Childs(): PolyNode[];
+    IsHole(): boolean;
+  }
+
+  class PolyTree extends PolyNode {
+    constructor();
+  }
+
   class Clipper {
     constructor(initOptions?: number);
     AddPath(path: Path, polyType: number, closed: boolean): boolean;
     AddPaths(paths: Paths, polyType: number, closed: boolean): boolean;
     Execute(
       clipType: number,
-      solution: Paths,
+      solution: Paths | PolyTree,
       subjFillType?: number,
       clipFillType?: number,
     ): boolean;

@@ -17,7 +17,7 @@ export const thickenStep: WorkerStep = {
     stampHeight: settings.height,
     nozzleDiameter: settings.nozzleDiameter,
     thickenEnabled: flags.thickenEnabled,
-    smoothEnabled: flags.smoothEnabled,
+    smoothEnabled: true, // EDT smooths its own raster trace; always on, as before
   }),
 
   parseResult: (message: unknown, prevData: DesignData) => {

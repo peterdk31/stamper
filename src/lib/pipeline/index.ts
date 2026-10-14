@@ -2,14 +2,14 @@
  * Stamp Pipeline
  *
  * Sources (parallel, each produces DesignData):
- *   1. Image/SVG  →  load pixels → trace contours → DesignData
+ *   1. Image/SVG  →  load pixels → trace polygon → fit curves (curve-fit.ts) → DesignData
  *   2. Text       →  font layout → DesignData
  *
  * Merge: combine all sources into a single DesignData
  *
  * Processing steps (sequential, DesignData → DesignData):
- *   3. Smooth (optional) — smooth contour curves
- *   4. Thicken (optional) — dilate thin features for nozzle width
+ *   3. Thicken (optional) — dilate thin features for nozzle width
+ *      (variants in registry.ts; default: medial-axis growth to the slicer's min perimeter width)
  *   [Add new steps here]
  *
  * Output:
@@ -26,14 +26,11 @@ export type { TracerDefinition } from "./tracer-types";
 export { textToDesignData } from "./text";
 export { mergeDesignData } from "./merge";
 export { thickenStep } from "./thicken";
-export { smoothStep } from "./smooth";
 export { TRACERS, STEP_SLOTS, getTracer, getStepVariant } from "./registry";
 
 import type { PipelineStep } from "./types";
 import { thickenStep } from "./thicken";
-import { smoothStep } from "./smooth";
 
 export const PROCESSING_STEPS: PipelineStep[] = [
-  smoothStep,
   thickenStep,
 ];

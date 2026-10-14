@@ -4,7 +4,7 @@ import { marchingSquaresTracer } from "./tracers/marching-squares";
 import { potraceTracer } from "./tracers/potrace";
 import { thickenStep } from "./thicken";
 import { clipperThickenStep } from "./thicken-clipper";
-import { smoothStep } from "./smooth";
+import { medialThickenStep } from "./thicken-medial";
 
 export const TRACERS: TracerDefinition[] = [
   potraceTracer,
@@ -13,18 +13,11 @@ export const TRACERS: TracerDefinition[] = [
 
 export const STEP_SLOTS: StepSlot[] = [
   {
-    id: "smooth",
-    label: "Smoothing",
-    defaultId: "chaikin",
-    variants: [
-      { id: "chaikin", label: "Chaikin", description: "Corner-cutting curve subdivision", step: smoothStep },
-    ],
-  },
-  {
     id: "thicken",
     label: "Thickening",
-    defaultId: "clipper",
+    defaultId: "medial",
     variants: [
+      { id: "medial", label: "Medial axis", description: "Grows every thin stroke to the slicer's minimum perimeter width", step: medialThickenStep },
       { id: "clipper", label: "Clipper", description: "Vector polygon offset thickening", step: clipperThickenStep },
       { id: "edt", label: "EDT", description: "Distance-transform raster thickening", step: thickenStep },
     ],

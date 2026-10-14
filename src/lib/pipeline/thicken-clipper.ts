@@ -17,7 +17,6 @@ export const clipperThickenStep: WorkerStep = {
     stampHeight: settings.height,
     nozzleDiameter: settings.nozzleDiameter,
     thickenEnabled: flags.thickenEnabled,
-    smoothEnabled: flags.smoothEnabled,
   }),
 
   parseResult: (message: unknown, prevData: DesignData) => {

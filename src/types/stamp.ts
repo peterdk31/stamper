@@ -33,6 +33,8 @@ export interface StampSettings {
   colorMasks: ColorMask[];
   invert: boolean; // flip dark/light before threshold
   nozzleDiameter: number; // mm — highlights features thinner than this in the preview
+  minPerimeterWidthPct: number; // % of nozzle — slicer's "Minimum perimeter width" (Arachne); medial thickening target
+  minFeatureSizePct: number; // % of nozzle — slicer's "Minimum feature size"; thinner features would not print
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
 }
@@ -52,6 +54,8 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   colorMasks: [],
   invert: false,
   nozzleDiameter: 0.4,
+  minPerimeterWidthPct: 85, // PrusaSlicer default
+  minFeatureSizePct: 25, // PrusaSlicer default
   threadEnabled: true,
   threadConfig: { ...DEFAULT_THREAD_CONFIG },
 };
@@ -79,6 +83,15 @@ export interface ThinFeatureMap {
   pixels: Uint8Array;
   gridW: number;
   gridH: number;
+  /** Set by the medial-axis thickener: the overlay shows changes, not just thin features. */
+  changes?: FeatureChanges;
+}
+export interface FeatureChanges {
+  thickened: boolean; // false = thickening off, overlay shows what the slicer would do
+  widened: boolean; // features between min feature size and target width
+  rescued: boolean; // features below min feature size
+  targetWidth: number; // mm
+  minFeatureSize: number; // mm
 }
 export interface DesignData {
   shapes: StampShapeData[];

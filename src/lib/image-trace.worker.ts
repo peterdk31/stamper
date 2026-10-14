@@ -1,4 +1,5 @@
 import { hasSelfIntersection } from "./contour-utils";
+import { fitCurves } from "./curve-fit";
 
 interface Point {
   x: number;
@@ -425,6 +426,7 @@ self.onmessage = (e: MessageEvent<TraceRequest>) => {
       contours.sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)));
       contours.length = MAX_CONTOURS;
     }
+    contours = contours.map((c) => fitCurves(c));
   }
 
   report(0.90, "Nesting contours…");

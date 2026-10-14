@@ -6,7 +6,7 @@ import { useRef, useMemo, useEffect, useState, memo } from "react";
 import * as THREE from "three";
 import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
-import type { StampSettings, ThinFeatureMap } from "@/types/stamp";
+import type { StampSettings, ThinFeatureMap, FeatureChanges } from "@/types/stamp";
 import type { StampGeoMessage } from "@/lib/stamp-geometry.worker";
 
 interface Props {
@@ -87,7 +87,10 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
     const designMesh = stampGroup.getObjectByName("design") as THREE.Mesh | undefined;
     if (!designMesh) return;
 
-    if (!thinFeatureMap || !thinFeatureMap.hasThinFeatures) {
+    const showOverlay = !!thinFeatureMap && (
+      thinFeatureMap.hasThinFeatures || !!thinFeatureMap.changes?.widened || !!thinFeatureMap.changes?.rescued
+    );
+    if (!thinFeatureMap || !showOverlay) {
       const normalColor = (stampGroup.userData.normalColor as number) ?? 0x8b5e3c;
       (designMesh.material as THREE.MeshStandardMaterial).map = null;
       (designMesh.material as THREE.MeshStandardMaterial).color.setHex(normalColor);
@@ -187,13 +190,51 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
         </div>
       </div>
 
-      {thinFeatureMap?.hasThinFeatures && (
-        <p className="mt-2 text-sm text-red-600">
-          Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red)
+      {thinFeatureMap?.changes
+        ? <FeatureChangesLegend changes={thinFeatureMap.changes} residual={thinFeatureMap.hasThinFeatures} />
+        : thinFeatureMap?.hasThinFeatures && (
+          <p className="mt-2 text-sm text-red-600">
+            Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red)
+          </p>
+        )}
+    </div>
+  );
+}
+
+function FeatureChangesLegend({ changes, residual }: { changes: FeatureChanges; residual: boolean }) {
+  const target = changes.targetWidth.toFixed(2);
+  const minFeature = changes.minFeatureSize.toFixed(2);
+  if (!changes.widened && !changes.rescued) return null;
+  return (
+    <div className="mt-2 space-y-0.5 text-sm">
+      {residual && (
+        <p className="text-purple-700">
+          <Swatch className="bg-purple-600" />
+          Still thinner than {target} mm after thickening — this is a bug. Try the Clipper or EDT variant.
+        </p>
+      )}
+      {changes.widened && (
+        <p className="text-amber-700">
+          <Swatch className="bg-amber-600" />
+          {changes.thickened
+            ? `Widened to ${target} mm — prints, but bolder than designed.`
+            : `Thinner than ${target} mm — the slicer will widen these.`}
+        </p>
+      )}
+      {changes.rescued && (
+        <p className="text-red-600">
+          <Swatch className="bg-red-600" />
+          {changes.thickened
+            ? `Was under ${minFeature} mm and would not have printed — now far from 1:1. Enlarge the stamp or text.`
+            : `Thinner than ${minFeature} mm — the slicer will drop these.`}
         </p>
       )}
     </div>
   );
+}
+
+function Swatch({ className }: { className: string }) {
+  return <span className={`inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-baseline ${className}`} />;
 }
 
 export default memo(StampPreview);

@@ -21,9 +21,8 @@ export default function Home() {
   const [availableFonts, setAvailableFonts] = useState<string[]>([]);
   const [fontsReady, setFontsReady] = useState(false);
   const [thickenEnabled, setThickenEnabled] = useState(true);
-  const [smoothEnabled, setSmoothEnabled] = useState(true);
   const [tracerAlgorithm, setTracerAlgorithm] = useState("potrace");
-  const [thickenAlgorithm, setThickenAlgorithm] = useState("clipper");
+  const [thickenAlgorithm, setThickenAlgorithm] = useState("medial");
 
   useEffect(() => {
     loadAllBundledFonts().then((entries) => {
@@ -46,7 +45,6 @@ export default function Home() {
     texts,
     fontsReady,
     thickenEnabled,
-    smoothEnabled,
     tracerAlgorithm,
     thickenAlgorithm,
   });
@@ -125,11 +123,8 @@ export default function Home() {
           <StampSettingsPanel settings={pipeline.effectiveSettings} onChange={setSettings}
             thickenEnabled={thickenEnabled}
             isThickening={pipeline.isThickening}
-            smoothEnabled={smoothEnabled}
-            isSmoothing={pipeline.isSmoothing}
             hasDesign={pipeline.hasDesign}
             onThickenToggle={() => setThickenEnabled((v) => !v)}
-            onSmoothToggle={() => setSmoothEnabled((v) => !v)}
             thickenAlgorithm={thickenAlgorithm}
             onThickenAlgorithmChange={setThickenAlgorithm}
             tracerAlgorithm={tracerAlgorithm}

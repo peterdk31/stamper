@@ -95,7 +95,8 @@ export function usePipelineStep(
       if (workerRef.current === worker) workerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, input, settings.width, settings.height, settings.nozzleDiameter, step, flags.thickenEnabled, flags.smoothEnabled]);
+  }, [enabled, input, settings.width, settings.height, settings.nozzleDiameter,
+      settings.minPerimeterWidthPct, settings.minFeatureSizePct, step, flags.thickenEnabled]);
 
   if (!enabled) return { data: input, isProcessing: false, progress: 0 };
   if (step.type === "sync") return { data: syncResult ?? input, isProcessing: false, progress: 0 };

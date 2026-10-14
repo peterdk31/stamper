@@ -2,7 +2,6 @@ import type { StampSettings, DesignData } from "@/types/stamp";
 
 export interface StepFlags {
   thickenEnabled: boolean;
-  smoothEnabled: boolean;
   tracerAlgorithm: string;
   thickenAlgorithm: string;
 }

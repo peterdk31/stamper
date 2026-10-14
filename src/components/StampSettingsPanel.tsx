@@ -13,11 +13,8 @@ interface Props {
   onChange: (settings: StampSettings) => void;
   thickenEnabled?: boolean;
   isThickening?: boolean;
-  smoothEnabled?: boolean;
-  isSmoothing?: boolean;
   hasDesign?: boolean;
   onThickenToggle?: () => void;
-  onSmoothToggle?: () => void;
   thickenAlgorithm?: string;
   onThickenAlgorithmChange?: (id: string) => void;
   tracerAlgorithm?: string;
@@ -27,7 +24,7 @@ interface Props {
 
 const thickenSlot = STEP_SLOTS.find((s) => s.id === "thicken");
 
-export default function StampSettingsPanel({ settings, onChange, thickenEnabled, isThickening, smoothEnabled, isSmoothing, hasDesign, onThickenToggle, onSmoothToggle, thickenAlgorithm, onThickenAlgorithmChange, tracerAlgorithm, onTracerChange, hasImage }: Props) {
+export default function StampSettingsPanel({ settings, onChange, thickenEnabled, isThickening, hasDesign, onThickenToggle, thickenAlgorithm, onThickenAlgorithmChange, tracerAlgorithm, onTracerChange, hasImage }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function update(partial: Partial<StampSettings>) {
@@ -119,22 +116,6 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
               <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
                 min={0} max={(Math.min(settings.width, settings.height) + settings.margin * 2) / 2} step={0.5}
                 onChange={(v) => update({ cornerRadius: v })} />
-              <div className="flex items-center justify-between">
-                <label className={`text-sm font-medium ${hasDesign ? "text-gray-700" : "text-gray-400"}`}>
-                  {isSmoothing ? "Smoothing…" : "Smooth curves"}
-                </label>
-                <button
-                  onClick={onSmoothToggle}
-                  disabled={!hasDesign}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                    smoothEnabled ? "bg-amber-700" : "bg-gray-300"
-                  } ${!hasDesign ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-                    smoothEnabled ? "translate-x-4.5" : "translate-x-0.5"
-                  }`} />
-                </button>
-              </div>
             </fieldset>
 
             <fieldset className="space-y-3 border-t pt-4">
@@ -181,6 +162,28 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
                     </button>
                   ))}
                 </div>
+              )}
+              {thickenAlgorithm === "medial" && (
+                <>
+                  <SliderInput label="Min perimeter width" unit="%" value={settings.minPerimeterWidthPct}
+                    min={25} max={150} step={1}
+                    headerRight={<span className="text-xs text-gray-500">
+                      {(settings.nozzleDiameter * settings.minPerimeterWidthPct / 100).toFixed(2)} mm
+                    </span>}
+                    onChange={(v) => update({
+                      minPerimeterWidthPct: v,
+                      minFeatureSizePct: Math.min(settings.minFeatureSizePct, v),
+                    })} />
+                  <SliderInput label="Min feature size" unit="%" value={settings.minFeatureSizePct}
+                    min={0} max={settings.minPerimeterWidthPct} step={1}
+                    headerRight={<span className="text-xs text-gray-500">
+                      {(settings.nozzleDiameter * settings.minFeatureSizePct / 100).toFixed(2)} mm
+                    </span>}
+                    onChange={(v) => update({ minFeatureSizePct: v })} />
+                  <p className="text-xs text-gray-500">
+                    % of nozzle, as in PrusaSlicer → Print Settings → Advanced → Arachne. Use 100% min perimeter width for the Classic generator.
+                  </p>
+                </>
               )}
             </fieldset>
 
