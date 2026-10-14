@@ -1,19 +1,22 @@
 import ClipperLib from "clipper-lib";
-import { CLIPPER_SCALE, MIN_AREA_SQ, clipperOffset, fromClipperPath, toClipperPath, type Point } from "./clipper-thicken";
+import { MIN_AREA_SQ, fromClipperPath, toClipperPath, type Point } from "./clipper-thicken";
+import { makeOffset } from "./base-outline";
 
 /**
  * Cutter ring around the stamp base: inner edge = base outline + clearance,
  * outer edge = inner + wall. Straight walls and nothing narrower than the base,
  * so stamp and cutter slide past each other in both directions — and stay two
  * separate tools, so clay never gets trapped between cutting wall and relief.
+ * `sharpCorners` keeps the base's sharp corners in the ring (miter joins).
  */
 export function cutterRing(
-  outline: Point[], clearance: number, wallThickness: number,
+  outline: Point[], clearance: number, wallThickness: number, sharpCorners = false,
 ): { outer: Point[]; inner: Point[] } | null {
   const path = toClipperPath(outline);
   if (ClipperLib.Clipper.Area(path) < 0) path.reverse();
-  const inner = largest(clipperOffset([path], clearance * CLIPPER_SCALE));
-  const outer = largest(clipperOffset([path], (clearance + wallThickness) * CLIPPER_SCALE));
+  const offset = makeOffset(sharpCorners);
+  const inner = largest(offset([path], clearance));
+  const outer = largest(offset([path], clearance + wallThickness));
   if (!inner || !outer) return null;
   return { outer: fromClipperPath(outer), inner: fromClipperPath(inner) };
 }

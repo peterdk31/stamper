@@ -18,6 +18,7 @@ export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
 // When enabled, the base outline follows the design (see base-outline.ts).
 export interface CutterConfig {
   fidelity: number;      // 0–100 — how closely the base outline follows the design (0 = rectangle)
+  sharpCorners: boolean; // keep the design's sharp corners instead of rounding them by the margin
   clayThickness: number; // mm — the cutting edge reaches this far below the stamp face
   wallThickness: number; // mm — ring wall
   gripHeight: number;    // mm — how far the ring reaches up the side of the base
@@ -26,6 +27,7 @@ export interface CutterConfig {
 
 export const DEFAULT_CUTTER_CONFIG: CutterConfig = {
   fidelity: 75,
+  sharpCorners: false,
   clayThickness: 6,
   wallThickness: 1.2,
   gripHeight: 4,

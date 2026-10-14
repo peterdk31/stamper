@@ -35,7 +35,7 @@ const U = pts([[0, 0], [30, 0], [30, 30], [22, 30], [22, 8], [8, 8], [8, 30], [0
 
 const input = (over: Partial<BaseOutlineInput>): BaseOutlineInput => ({
   shapes: [{ outer: U, holes: [] }],
-  width: 30, height: 30, margin: 3, fidelity: 100, threadDiameter: null,
+  width: 30, height: 30, margin: 3, fidelity: 100, sharpCorners: false, threadDiameter: null,
   ...over,
 });
 
@@ -63,6 +63,17 @@ describe("computeBaseOutline", () => {
     expect(b.y1).toBeCloseTo(36, 1);
     // Corners rounded by the margin: 36² − (4 − π)·3², less the arcs' chord sag
     expect(Math.abs(area(outline) - (36 * 36 - (4 - Math.PI) * 9))).toBeLessThan(2);
+  });
+
+  it("keeps the design's sharp corners with sharpCorners", () => {
+    const round = computeBaseOutline(input({ fidelity: 100 }))!;
+    const sharp = computeBaseOutline(input({ fidelity: 100, sharpCorners: true }))!;
+    // The U's outer corner grown by 3 mm: mitered it reaches (−3, −3), rounded it doesn't.
+    expect(inside({ x: -2.8, y: -2.8 }, sharp.map(p => ({ x: p.x - 3, y: p.y - 3 })))).toBe(true);
+    expect(inside({ x: -2.8, y: -2.8 }, round.map(p => ({ x: p.x - 3, y: p.y - 3 })))).toBe(false);
+    // Fidelity 0 becomes a square-cornered plate.
+    const plate = computeBaseOutline(input({ fidelity: 0, sharpCorners: true }))!;
+    expect(area(plate)).toBeCloseTo(36 * 36, 0);
   });
 
   it("never shrinks as fidelity drops", () => {
@@ -106,6 +117,11 @@ describe("cutterRing", () => {
     expect(inner.x1).toBeCloseTo(20.3, 2);
     expect(outer.y0).toBeCloseTo(-1.5, 2);
     expect(outer.y1).toBeCloseTo(11.5, 2);
+  });
+
+  it("keeps sharp ring corners with sharpCorners", () => {
+    const ring = cutterRing(rect(0, 0, 20, 10), 0.3, 1.2, true)!;
+    expect(area(ring.outer)).toBeCloseTo(23 * 13, 1);
   });
 
   it("spans from the grip height up the base to one clay thickness below the face", () => {

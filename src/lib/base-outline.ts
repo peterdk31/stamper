@@ -1,6 +1,6 @@
 import ClipperLib from "clipper-lib";
 import {
-  CLIPPER_SCALE, MIN_AREA_SQ, clipperBoolOp, clipperOffset, fromClipperPath, toClipperPath, type Point,
+  ARC_TOLERANCE, CLIPPER_SCALE, MIN_AREA_SQ, clipperBoolOp, fromClipperPath, toClipperPath, type Point,
 } from "./clipper-thicken";
 import { simplifyShape } from "./simplify";
 
@@ -15,6 +15,8 @@ import { simplifyShape } from "./simplify";
  *   rectangle; at 0 the outline is today's rectangular plate (corners rounded
  *   by the margin).
  * Islands are always bridged, using the smallest closing radius that joins them.
+ * With `sharpCorners`, every offset uses miter joins, so corners of the design
+ * stay sharp instead of being rounded by the margin.
  */
 
 export interface BaseOutlineInput {
@@ -25,6 +27,8 @@ export interface BaseOutlineInput {
   height: number;
   margin: number;
   fidelity: number;
+  /** Miter joins instead of round: the outline keeps the design's sharp corners. */
+  sharpCorners: boolean;
   /** Major diameter of the handle thread, or null without a handle mount. */
   threadDiameter: number | null;
 }
@@ -33,8 +37,23 @@ export interface BaseOutlineInput {
 export const THREAD_WALL = 2;
 const SIMPLIFY_TOLERANCE = 0.05;
 const DISC_SEGMENTS = 64;
+/** Miter spikes longer than this × offset are squared off (thin tips would otherwise shoot far out). */
+const MITER_LIMIT = 2;
 
 type Paths = ClipperLib.Paths;
+/** Offsets paths by `mm` (negative shrinks), with the join chosen once per outline. */
+type Offset = (paths: Paths, mm: number) => Paths;
+
+export function makeOffset(sharp: boolean): Offset {
+  const join = sharp ? ClipperLib.JoinType.jtMiter : ClipperLib.JoinType.jtRound;
+  return (paths, mm) => {
+    const co = new ClipperLib.ClipperOffset(MITER_LIMIT, ARC_TOLERANCE);
+    for (const p of paths) co.AddPath(p, join, ClipperLib.EndType.etClosedPolygon);
+    const result: Paths = [];
+    co.Execute(result, mm * CLIPPER_SCALE);
+    return outersOnly(result);
+  };
+}
 
 function outersOnly(paths: Paths): Paths {
   return paths.filter((p) => ClipperLib.Clipper.Area(p) > MIN_AREA_SQ);
@@ -62,10 +81,9 @@ function silhouette(shapes: BaseOutlineInput["shapes"]): Paths {
   return outersOnly(clipperBoolOp(paths, [], ClipperLib.ClipType.ctUnion));
 }
 
-function closing(paths: Paths, r: number): Paths {
+function closing(paths: Paths, r: number, offset: Offset): Paths {
   if (r <= 0) return paths;
-  const grown = outersOnly(clipperOffset(paths, r * CLIPPER_SCALE));
-  return outersOnly(clipperOffset(grown, -r * CLIPPER_SCALE));
+  return offset(offset(paths, r), -r);
 }
 
 function bboxSize(paths: Paths): number {
@@ -77,16 +95,16 @@ function bboxSize(paths: Paths): number {
 }
 
 /** Smallest closing that leaves a single piece (binary search to ~0.05 mm). */
-export function mergeIslands(paths: Paths): { paths: Paths; radius: number } {
+function mergeIslands(paths: Paths, offset: Offset): { paths: Paths; radius: number } {
   if (paths.length <= 1) return { paths, radius: 0 };
   let hi = Math.max(bboxSize(paths) / 2, 1);
-  let closed = closing(paths, hi);
-  for (let i = 0; closed.length > 1 && i < 4; i++) { hi *= 2; closed = closing(paths, hi); }
+  let closed = closing(paths, hi, offset);
+  for (let i = 0; closed.length > 1 && i < 4; i++) { hi *= 2; closed = closing(paths, hi, offset); }
   if (closed.length > 1) return { paths: [hullPath(paths)], radius: hi };
   let lo = 0;
   while (hi - lo > 0.05) {
     const mid = (lo + hi) / 2;
-    const c = closing(paths, mid);
+    const c = closing(paths, mid, offset);
     if (c.length === 1) { hi = mid; closed = c; } else lo = mid;
   }
   return { paths: closed, radius: hi };
@@ -152,14 +170,15 @@ export function closingRadius(fidelity: number, mergeRadius: number, size: numbe
  */
 function smoothAndGrow(sil: Paths, input: BaseOutlineInput): Paths {
   const f = Math.min(100, Math.max(0, input.fidelity));
-  const grow = (p: Paths) => input.margin > 0 ? outersOnly(clipperOffset(p, input.margin * CLIPPER_SCALE)) : p;
+  const offset = makeOffset(input.sharpCorners);
+  const grow = (p: Paths) => input.margin > 0 ? offset(p, input.margin) : p;
   if (f <= 50) return grow([blendHullToRect(hullPoints(sil), input.width, input.height, f / 50)]);
 
   const grown = grow(sil);
-  const merged = mergeIslands(grown);
+  const merged = mergeIslands(grown, offset);
   if (f >= 100) return merged.paths;
   const size = Math.max(input.width, input.height) + 2 * input.margin;
-  return mergeIslands(closing(grown, closingRadius(f, merged.radius, size))).paths;
+  return mergeIslands(closing(grown, closingRadius(f, merged.radius, size), offset), offset).paths;
 }
 
 function disc(cx: number, cy: number, r: number): ClipperLib.Path {
@@ -185,7 +204,7 @@ export function computeBaseOutline(input: BaseOutlineInput): Point[] | null {
     const d = disc(input.width / 2, input.height / 2, input.threadDiameter / 2 + THREAD_WALL);
     base = outersOnly(clipperBoolOp(base, [d], ClipperLib.ClipType.ctUnion));
   }
-  const outer = largestOuter(mergeIslands(base).paths);
+  const outer = largestOuter(mergeIslands(base, makeOffset(input.sharpCorners)).paths);
   if (!outer) return null;
 
   const ring = fromClipperPath(outer);

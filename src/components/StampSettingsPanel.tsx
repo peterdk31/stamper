@@ -108,6 +108,11 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
                 {cutter.fidelity === 0 ? "rectangle" : cutter.fidelity <= 50 ? "rounder" : cutter.fidelity === 100 ? "follows design" : "smoothed"}
               </span>}
               onChange={(v) => updateCutter({ fidelity: v })} />
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={cutter.sharpCorners}
+                onChange={(e) => updateCutter({ sharpCorners: e.target.checked })} />
+              Sharp corners
+            </label>
             <SliderInput label="Clay thickness" unit="mm" value={cutter.clayThickness} min={2} max={20} step={0.5}
               onChange={(v) => updateCutter({ clayThickness: v })} />
             {reliefTooDeep ? (
