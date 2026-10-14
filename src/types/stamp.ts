@@ -31,7 +31,7 @@ export const DEFAULT_CUTTER_CONFIG: CutterConfig = {
   clayThickness: 6,
   wallThickness: 1.2,
   gripHeight: 4,
-  clearance: 0.3,
+  clearance: 0.2,
 };
 
 export interface ColorMask { hue: number; saturation: number; lightness: number; tolerance: number }
