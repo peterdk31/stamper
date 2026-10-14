@@ -1,6 +1,6 @@
 import { Shape, Path, ExtrudeGeometry } from "three";
 import type { ThreadConfig } from "@/types/stamp";
-import { simplifyContour } from "./simplify";
+import { simplifyShape } from "./simplify";
 import { createRoundedRectShape } from "./stamp-geometry";
 import { createFemaleThreadGeometry } from "./thread-geometry";
 
@@ -64,15 +64,14 @@ const SIMPLIFY_TOLERANCE = 0.05;
 
 function toShapes(data: ShapeInput[]): Shape[] {
   return data.filter(sd => sd.outer.length >= 3).map(sd => {
-    const outer = simplifyContour(sd.outer, SIMPLIFY_TOLERANCE);
-    if (outer.length < 3) return null;
+    const simplified = simplifyShape(sd.outer, sd.holes, SIMPLIFY_TOLERANCE);
+    if (!simplified) return null;
+    const { outer } = simplified;
     const shape = new Shape();
     shape.moveTo(outer[0].x, outer[0].y);
     for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i].x, outer[i].y);
     shape.closePath();
-    for (const hole of sd.holes) {
-      const h = simplifyContour(hole, SIMPLIFY_TOLERANCE);
-      if (h.length < 3) continue;
+    for (const h of simplified.holes) {
       const path = new Path();
       path.moveTo(h[0].x, h[0].y);
       for (let i = 1; i < h.length; i++) path.lineTo(h[i].x, h[i].y);

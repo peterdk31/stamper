@@ -1,3 +1,5 @@
+import { ringsCross } from "./contour-utils";
+
 interface Point {
   x: number;
   y: number;
@@ -18,6 +20,29 @@ function perpendicularDistance(point: Point, lineStart: Point, lineEnd: Point): 
   const ex = point.x - projX;
   const ey = point.y - projY;
   return Math.sqrt(ex * ex + ey * ey);
+}
+
+const MAX_SAFE_RETRIES = 4; // tolerance halvings before keeping the outline as is
+
+/**
+ * Simplifies a shape's outer and holes without letting any edges cross.
+ *
+ * Douglas-Peucker on each ring alone can fold a narrow wedge (e.g. the gap
+ * between two fin rays meeting at a point) into a bow-tie, or move a hole
+ * across the outer. Triangulation then fills the hole. Where that happens the
+ * tolerance is halved and the shape simplified again; if it still crosses,
+ * the unsimplified rings are kept. Rings simplified below 3 points are dropped.
+ */
+export function simplifyShape(
+  outer: Point[], holes: Point[][], tolerance: number,
+): { outer: Point[]; holes: Point[][] } | null {
+  for (let attempt = 0, tol = tolerance; attempt <= MAX_SAFE_RETRIES; attempt++, tol /= 2) {
+    const o = simplifyContour(outer, tol);
+    if (o.length < 3) return null;
+    const hs = holes.map((h) => simplifyContour(h, tol)).filter((h) => h.length >= 3);
+    if (!ringsCross([o, ...hs])) return { outer: o, holes: hs };
+  }
+  return { outer, holes: holes.filter((h) => h.length >= 3) };
 }
 
 export function simplifyContour(points: Point[], tolerance: number): Point[] {

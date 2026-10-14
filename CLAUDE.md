@@ -76,7 +76,7 @@ Sources (parallel):                Processing (sequential):           Output:
   - `text-layouts.ts` — preset layout generators (circular, stacked, monogram)
   - `thread-geometry.ts` — parametric helical thread geometry (female for stamp, male for handle)
   - `handle-geometry.ts` — handle body generators (knob, T-bar, mushroom) with male thread post
-  - `simplify.ts` — Douglas-Peucker contour simplification
+  - `simplify.ts` — Douglas-Peucker contour simplification; `simplifyShape()` (used by the stamp worker) simplifies a shape's outer + holes and backs off the tolerance if any edges would cross, since a crossing hole gets filled by triangulation
   - `potrace-trace.ts` — Potrace-style tracer core (optimal polygon + vertex adjustment), used by `potrace.worker.ts`
   - `curve-fit.ts` — Potrace curve fitting: polygon → Bézier curves that keep sharp corners and don't shrink the shape. Applied by both tracers; there is no separate smoothing step.
   - `medial-thicken.ts` — default thickener: widens every stroke thinner than the slicer's min perimeter width (`minPerimeterWidthPct` of nozzle) by pushing its outline edges straight outward (straight sides stay straight, square ends stay square), fills junction notches from a disc-grown fallback, rounds sharp tips, and builds the widened/rescued overlay. Pure functions, tested in `__tests__/medial-thicken.test.ts`.
