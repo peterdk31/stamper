@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import type { StampPoint, StampShapeData, DesignData } from "@/types/stamp";
-import { hasSelfIntersection } from "./contour-utils";
+import ClipperLib from "clipper-lib";
+import { ringsCross } from "./contour-utils";
+import { MIN_AREA_SQ, toClipperPath, fromClipperPath } from "./clipper-thicken";
 
 export function computeBounds(shapes: StampShapeData[]): DesignData["bounds"] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -53,11 +55,39 @@ function signedArea(pts: { x: number; y: number }[]): number {
   return a * 0.5;
 }
 
+/**
+ * A shape whose rings cross, untangled into simple outers and holes (even-odd
+ * fill). Clipper's rounding can leave tiny spikes that cross back over an
+ * edge; dropping such a ring would fill a hole or lose a stroke.
+ */
+function untangle(sd: StampShapeData): StampShapeData[] {
+  const rings = [sd.outer, ...sd.holes].filter((r) => r.length >= 3);
+  if (!ringsCross(rings)) return [sd];
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(rings.map(toClipperPath), ClipperLib.PolyType.ptSubject, true);
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftEvenOdd);
+  const out: StampShapeData[] = [];
+  const walk = (node: ClipperLib.PolyNode) => {
+    for (const outerNode of node.Childs()) {
+      const holes: StampPoint[][] = [];
+      for (const holeNode of outerNode.Childs()) {
+        if (Math.abs(ClipperLib.Clipper.Area(holeNode.Contour())) >= MIN_AREA_SQ) holes.push(fromClipperPath(holeNode.Contour()));
+        walk(holeNode); // islands inside the hole
+      }
+      if (Math.abs(ClipperLib.Clipper.Area(outerNode.Contour())) >= MIN_AREA_SQ) {
+        out.push({ outer: fromClipperPath(outerNode.Contour()), holes, ...(sd.source && { source: sd.source }) });
+      }
+    }
+  };
+  walk(tree);
+  return out;
+}
+
 export function designDataToShapes(data: DesignData): THREE.Shape[] {
   const result: THREE.Shape[] = [];
-  for (const sd of data.shapes) {
+  for (const sd of data.shapes.flatMap(untangle)) {
     if (sd.outer.length < 3) continue;
-    if (sd.outer.length <= 200 && hasSelfIntersection(sd.outer)) continue;
 
     // Outers must be CCW (positive area), holes CW (negative area)
     const outer = signedArea(sd.outer) < 0 ? [...sd.outer].reverse() : sd.outer;
@@ -69,7 +99,6 @@ export function designDataToShapes(data: DesignData): THREE.Shape[] {
 
     for (const hole of sd.holes) {
       if (hole.length < 3) continue;
-      if (hole.length <= 200 && hasSelfIntersection(hole)) continue;
       const h = signedArea(hole) > 0 ? [...hole].reverse() : hole;
       const path = new THREE.Path();
       path.moveTo(h[0].x, h[0].y);

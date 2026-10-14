@@ -66,7 +66,7 @@ Sources (parallel):                Processing (sequential):           Output:
   - `usePipelineStep.ts` — generic hook that runs any `PipelineStep`
 - `src/lib/` — pure logic, no React:
   - `image-trace.worker.ts` — bitmap → contour shapes (marching-squares + Douglas-Peucker simplification)
-  - `design-data.ts` — `rasterToDesignData()`, `designDataToShapes()`, contour nesting
+  - `design-data.ts` — `rasterToDesignData()`, `designDataToShapes()` (untangles shapes whose rings cross with a Clipper even-odd union — never drop a ring, a dropped hole prints filled), contour nesting
   - `stamp-geometry.worker.ts` — builds the stamp meshes (rounded-rect base, design extrusion, female thread) off the main thread. Contains `mirrorShapes()`; imports the female thread from `thread-geometry.ts`.
   - `stamp-geometry.ts` — `createRoundedRectShape()`, shared with `clay-geometry.ts`
   - `clay-geometry.ts` — builds clay impression preview (inverted stamp design, unmirrored)
