@@ -14,6 +14,24 @@ export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
   segments: 48,
 };
 
+// The cutter is a separate straight-walled ring that slides over the stamp base.
+// When enabled, the base outline follows the design (see base-outline.ts).
+export interface CutterConfig {
+  fidelity: number;      // 0–100 — how closely the base outline follows the design (0 = rectangle)
+  clayThickness: number; // mm — the cutting edge reaches this far below the stamp face
+  wallThickness: number; // mm — ring wall
+  gripHeight: number;    // mm — how far the ring reaches up the side of the base
+  clearance: number;     // mm — gap between base and ring
+}
+
+export const DEFAULT_CUTTER_CONFIG: CutterConfig = {
+  fidelity: 75,
+  clayThickness: 6,
+  wallThickness: 1.2,
+  gripHeight: 4,
+  clearance: 0.3,
+};
+
 export interface ColorMask { hue: number; saturation: number; lightness: number; tolerance: number }
 
 export type FitDimension = "width" | "height" | "off";
@@ -37,6 +55,8 @@ export interface StampSettings {
   minFeatureSizePct: number; // % of nozzle — slicer's "Minimum feature size"; thinner features would not print
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
+  cutterEnabled: boolean;
+  cutterConfig: CutterConfig;
 }
 
 export const DEFAULT_STAMP_SETTINGS: StampSettings = {
@@ -58,6 +78,8 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   minFeatureSizePct: 25, // PrusaSlicer default
   threadEnabled: true,
   threadConfig: { ...DEFAULT_THREAD_CONFIG },
+  cutterEnabled: false,
+  cutterConfig: { ...DEFAULT_CUTTER_CONFIG },
 };
 
 export type TextAlign = "top" | "bottom";

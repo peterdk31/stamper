@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  type CutterConfig,
   type StampSettings,
   type ThreadConfig,
 } from "@/types/stamp";
@@ -39,6 +40,13 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
     onChange({ ...settings, threadConfig: { ...settings.threadConfig, ...partial } });
   }
 
+  function updateCutter(partial: Partial<CutterConfig>) {
+    onChange({ ...settings, cutterConfig: { ...settings.cutterConfig, ...partial } });
+  }
+
+  const cutter = settings.cutterConfig;
+  const reliefTooDeep = settings.impressionDepth > cutter.clayThickness;
+
   return (
     <div className="space-y-4 p-4 bg-white rounded-lg shadow">
       <h2 className="text-lg font-semibold">Stamp Settings</h2>
@@ -72,6 +80,55 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
           Plate: {((settings.width + settings.margin * 2) / 10).toFixed(1)} × {((settings.height + settings.margin * 2) / 10).toFixed(1)} cm
           {" "}(design area + 2 × {settings.margin} mm margin)
         </p>
+      </fieldset>
+
+      <fieldset className="space-y-3 border-t pt-3">
+        <legend className="sr-only">Clay cutter</legend>
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-gray-700 min-w-0">Clay cutter</label>
+          <button
+            onClick={() => update({ cutterEnabled: !settings.cutterEnabled })}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              settings.cutterEnabled ? "bg-amber-700" : "bg-gray-300"
+            }`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+              settings.cutterEnabled ? "translate-x-4.5" : "translate-x-0.5"
+            }`} />
+          </button>
+        </div>
+        {settings.cutterEnabled && (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              The stamp base follows the design, and a separate ring cuts the clay tile around it.
+              Use them in either order: the ring slides over the stamp.
+            </p>
+            <SliderInput label="Outline fidelity" value={cutter.fidelity} min={0} max={100} step={5}
+              headerRight={<span className="text-xs text-gray-500">
+                {cutter.fidelity === 0 ? "rectangle" : cutter.fidelity <= 50 ? "rounder" : cutter.fidelity === 100 ? "follows design" : "smoothed"}
+              </span>}
+              onChange={(v) => updateCutter({ fidelity: v })} />
+            <SliderInput label="Clay thickness" unit="mm" value={cutter.clayThickness} min={2} max={20} step={0.5}
+              onChange={(v) => updateCutter({ clayThickness: v })} />
+            {reliefTooDeep ? (
+              <p className="text-xs text-red-600">
+                The relief ({settings.impressionDepth} mm) is deeper than the clay, so it hits the table first and the
+                cutter won&apos;t cut through. Use thicker clay or a shallower impression depth.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Cuts a {cutter.clayThickness} mm slab · full {settings.impressionDepth} mm impression
+              </p>
+            )}
+            <SliderInput label="Wall thickness" unit="mm" value={cutter.wallThickness} min={0.8} max={3} step={0.1}
+              onChange={(v) => updateCutter({ wallThickness: v })} />
+            <SliderInput label="Grip height" unit="mm" value={Math.min(cutter.gripHeight, settings.baseThickness)}
+              min={0} max={settings.baseThickness} step={0.5}
+              onChange={(v) => updateCutter({ gripHeight: v })} />
+            <SliderInput label="Fit clearance" unit="mm" value={cutter.clearance} min={0.1} max={0.6} step={0.05}
+              onChange={(v) => updateCutter({ clearance: v })} />
+          </div>
+        )}
       </fieldset>
 
       <div className="border-t pt-3">
@@ -118,9 +175,11 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
                 onChange={(v) => update({ impressionDepth: v })} />
               <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
                 onChange={(v) => update({ margin: v })} />
-              <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
-                min={0} max={(Math.min(settings.width, settings.height) + settings.margin * 2) / 2} step={0.5}
-                onChange={(v) => update({ cornerRadius: v })} />
+              {!settings.cutterEnabled && (
+                <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
+                  min={0} max={(Math.min(settings.width, settings.height) + settings.margin * 2) / 2} step={0.5}
+                  onChange={(v) => update({ cornerRadius: v })} />
+              )}
             </fieldset>
 
             <fieldset className="space-y-3 border-t pt-4">

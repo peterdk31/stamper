@@ -8,7 +8,26 @@ import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
 import DimensionOverlay, { IMPRINT_COLOR, PLATE_COLOR, AREA_COLOR } from "./DimensionOverlay";
 import type { StampSettings, ThinFeatureMap, FeatureChanges } from "@/types/stamp";
-import type { StampGeoMessage } from "@/lib/stamp-geometry.worker";
+import type { StampGeoMessage, SerializedMesh } from "@/lib/stamp-geometry.worker";
+
+function buildGroup(meshes: SerializedMesh[]): THREE.Group {
+  const group = new THREE.Group();
+  for (const m of meshes) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(m.position, 3));
+    if (m.normal.length > 0) {
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(m.normal, 3));
+    }
+    if (m.index) geo.setIndex(new THREE.BufferAttribute(m.index, 1));
+    const mat = new THREE.MeshStandardMaterial({ color: m.color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = m.name;
+    mesh.position.set(m.px, m.py, m.pz);
+    mesh.rotation.set(m.rx, m.ry, m.rz);
+    group.add(mesh);
+  }
+  return group;
+}
 
 interface Props {
   settings: StampSettings;
@@ -21,6 +40,8 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
   const stampRef = useRef<THREE.Group>(null);
   const geoWorkerRef = useRef<Worker | null>(null);
   const [stampGroup, setStampGroup] = useState<THREE.Group | null>(null);
+  const [cutterGroup, setCutterGroup] = useState<THREE.Group | null>(null);
+  const [cutterOnStamp, setCutterOnStamp] = useState(false);
   const [showDimensions, setShowDimensions] = useState(true);
 
   useEffect(() => {
@@ -36,25 +57,12 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
 
     worker.onmessage = (e: MessageEvent<StampGeoMessage>) => {
       if (geoWorkerRef.current !== worker) return;
-      const { meshes, normalColor } = e.data;
+      const { meshes, cutterMeshes, normalColor } = e.data;
 
-      const group = new THREE.Group();
-      for (const m of meshes) {
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.Float32BufferAttribute(m.position, 3));
-        if (m.normal.length > 0) {
-          geo.setAttribute("normal", new THREE.Float32BufferAttribute(m.normal, 3));
-        }
-        if (m.index) geo.setIndex(new THREE.BufferAttribute(m.index, 1));
-        const mat = new THREE.MeshStandardMaterial({ color: m.color });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.name = m.name;
-        mesh.position.set(m.px, m.py, m.pz);
-        mesh.rotation.set(m.rx, m.ry, m.rz);
-        group.add(mesh);
-      }
+      const group = buildGroup(meshes);
       group.userData.normalColor = normalColor;
       setStampGroup(group);
+      setCutterGroup(cutterMeshes.length > 0 ? buildGroup(cutterMeshes) : null);
 
       worker.terminate();
       geoWorkerRef.current = null;
@@ -75,6 +83,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
       cornerRadius: settings.cornerRadius,
       threadEnabled: settings.threadEnabled,
       threadConfig: settings.threadConfig,
+      cutter: settings.cutterEnabled ? settings.cutterConfig : null,
     });
 
     return () => {
@@ -82,7 +91,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
       if (geoWorkerRef.current === worker) geoWorkerRef.current = null;
     };
   }, [shapes, settings.width, settings.height, settings.margin, settings.baseThickness, settings.impressionDepth,
-      settings.cornerRadius, settings.threadEnabled, settings.threadConfig]);
+      settings.cornerRadius, settings.threadEnabled, settings.threadConfig, settings.cutterEnabled, settings.cutterConfig]);
 
   useEffect(() => {
     if (!stampGroup) return;
@@ -144,6 +153,13 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
     return handle;
   }, [settings.threadEnabled, settings.threadConfig, settings.width, settings.height]);
 
+  // Beside the stamp (opposite the handle), or slid onto it to check the fit.
+  useEffect(() => {
+    if (!cutterGroup) return;
+    const gap = 15;
+    cutterGroup.position.set(0, cutterOnStamp ? 0 : -(settings.height + settings.margin * 2 + gap), 0);
+  }, [cutterGroup, cutterOnStamp, settings.height, settings.margin]);
+
   const center = useMemo(() => {
     return new THREE.Vector3(
       settings.width / 2,
@@ -155,6 +171,11 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
   function handleExportStamp() {
     if (!stampRef.current) return;
     downloadSTL(stampRef.current, `${exportName}-stamp.stl`);
+  }
+
+  function handleExportCutter() {
+    if (!cutterGroup) return;
+    downloadSTL(cutterGroup, `${exportName}-cutter.stl`);
   }
 
   function handleExportHandle() {
@@ -170,6 +191,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
           <directionalLight position={[50, 50, 50]} intensity={1} />
           {stampGroup && <primitive ref={stampRef} object={stampGroup} />}
           {handleGroup && <primitive object={handleGroup} />}
+          {settings.cutterEnabled && cutterGroup && <primitive object={cutterGroup} />}
           {/* Sibling of the stamp group, not a child, so it never ends up in the STL */}
           {showDimensions && <DimensionOverlay settings={settings} shapes={shapes} />}
           <OrbitControls target={center} />
@@ -192,6 +214,16 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
               <LegendItem color={AREA_COLOR} dashed>design area (Width × Height)</LegendItem>
             </ul>
           )}
+          {settings.cutterEnabled && (
+            <label className="mt-1 flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={cutterOnStamp}
+                onChange={e => setCutterOnStamp(e.target.checked)}
+              />
+              Cutter on stamp
+            </label>
+          )}
         </div>
 
         <div className="absolute z-20 bottom-2 left-2 right-2 flex justify-end gap-2 sm:left-auto sm:bottom-3 sm:right-3">
@@ -207,6 +239,15 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
               className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm"
             >
               Export Handle STL
+            </button>
+          )}
+          {settings.cutterEnabled && (
+            <button
+              onClick={handleExportCutter}
+              disabled={!cutterGroup}
+              className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm disabled:opacity-50"
+            >
+              Export Cutter STL
             </button>
           )}
         </div>

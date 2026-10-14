@@ -1,8 +1,10 @@
 import { Shape, Path, ExtrudeGeometry } from "three";
-import type { ThreadConfig } from "@/types/stamp";
+import type { CutterConfig, ThreadConfig } from "@/types/stamp";
 import { simplifyShape } from "./simplify";
 import { createRoundedRectShape } from "./stamp-geometry";
 import { createFemaleThreadGeometry } from "./thread-geometry";
+import { computeBaseOutline } from "./base-outline";
+import { cutterRing, cutterZRange } from "./cutter-geometry";
 
 interface PointData { x: number; y: number }
 interface ShapeInput { outer: PointData[]; holes: PointData[][] }
@@ -17,6 +19,8 @@ interface GeometryRequest {
   cornerRadius: number;
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
+  /** Cutter mode: the base follows the design and a cutter ring is built. */
+  cutter: CutterConfig | null;
 }
 
 export interface SerializedMesh {
@@ -32,6 +36,8 @@ export interface SerializedMesh {
 export type StampGeoMessage = {
   type: "result";
   meshes: SerializedMesh[];
+  /** Cutter ring, in stamp coordinates (it fits around the base as built). Empty without cutter mode. */
+  cutterMeshes: SerializedMesh[];
   normalColor: number;
 };
 
@@ -62,22 +68,25 @@ function mirrorShapes(shapes: Shape[], width: number): Shape[] {
 
 const SIMPLIFY_TOLERANCE = 0.05;
 
+function pointsToShape(outer: PointData[], holes: PointData[][] = []): Shape {
+  const shape = new Shape();
+  shape.moveTo(outer[0].x, outer[0].y);
+  for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i].x, outer[i].y);
+  shape.closePath();
+  for (const h of holes) {
+    const path = new Path();
+    path.moveTo(h[0].x, h[0].y);
+    for (let i = 1; i < h.length; i++) path.lineTo(h[i].x, h[i].y);
+    shape.holes.push(path);
+  }
+  return shape;
+}
+
 function toShapes(data: ShapeInput[]): Shape[] {
   return data.filter(sd => sd.outer.length >= 3).map(sd => {
     const simplified = simplifyShape(sd.outer, sd.holes, SIMPLIFY_TOLERANCE);
     if (!simplified) return null;
-    const { outer } = simplified;
-    const shape = new Shape();
-    shape.moveTo(outer[0].x, outer[0].y);
-    for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i].x, outer[i].y);
-    shape.closePath();
-    for (const h of simplified.holes) {
-      const path = new Path();
-      path.moveTo(h[0].x, h[0].y);
-      for (let i = 1; i < h.length; i++) path.lineTo(h[i].x, h[i].y);
-      shape.holes.push(path);
-    }
-    return shape;
+    return pointsToShape(simplified.outer, simplified.holes);
   }).filter((s): s is Shape => s !== null);
 }
 
@@ -101,7 +110,7 @@ function serializeGeo(
 const OVERLAP = 0.01;
 
 self.onmessage = (e: MessageEvent<GeometryRequest>) => {
-  const { shapes: shapeData, width, height, margin, baseThickness, impressionDepth, cornerRadius, threadEnabled, threadConfig } = e.data;
+  const { shapes: shapeData, width, height, margin, baseThickness, impressionDepth, cornerRadius, threadEnabled, threadConfig, cutter } = e.data;
 
   const physW = width + margin * 2;
   const physH = height + margin * 2;
@@ -115,11 +124,22 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
 
   const baseBottomDepth = baseThickness;
 
+  // Cutter mode: base outline follows the design. Computed unmirrored in plate
+  // coordinates, mirrored here like the design (x → physW − x).
+  const outline = cutter ? computeBaseOutline({
+    shapes: shapeData, width, height, margin, fidelity: cutter.fidelity,
+    threadDiameter: threadEnabled ? threadConfig.majorDiameter : null,
+  }) : null;
+  const mirroredOutline = outline?.map(p => ({ x: physW - p.x, y: p.y })) ?? null;
+  const baseShape = () => mirroredOutline
+    ? pointsToShape(mirroredOutline)
+    : createRoundedRectShape(physW, physH, cornerRadius);
+
   if (threadEnabled) {
     const majorR = threadConfig.majorDiameter / 2;
     const threadDepth = Math.min(threadConfig.height, baseBottomDepth);
 
-    const holedShape = createRoundedRectShape(physW, physH, cornerRadius);
+    const holedShape = baseShape();
     const holePath = new Path();
     holePath.absarc(physW / 2, physH / 2, majorR, 0, Math.PI * 2, true);
     holedShape.holes.push(holePath);
@@ -130,7 +150,7 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
     meshes.push(serializeGeo(backGeo, "base-back", baseColor));
 
     if (threadDepth < baseBottomDepth) {
-      const frontShape = createRoundedRectShape(physW, physH, cornerRadius);
+      const frontShape = baseShape();
       const frontGeo = new ExtrudeGeometry(frontShape, {
         depth: baseBottomDepth - threadDepth + OVERLAP,
         bevelEnabled: false,
@@ -138,8 +158,7 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
       meshes.push(serializeGeo(frontGeo, "base-front", baseColor, 0, 0, threadDepth - OVERLAP));
     }
   } else {
-    const baseShape = createRoundedRectShape(physW, physH, cornerRadius);
-    const baseGeo = new ExtrudeGeometry(baseShape, { depth: baseBottomDepth, bevelEnabled: false });
+    const baseGeo = new ExtrudeGeometry(baseShape(), { depth: baseBottomDepth, bevelEnabled: false });
     meshes.push(serializeGeo(baseGeo, "base", baseColor));
   }
 
@@ -166,12 +185,24 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
     });
   }
 
+  const cutterMeshes: SerializedMesh[] = [];
+  if (cutter) {
+    const ringOutline = mirroredOutline
+      ?? createRoundedRectShape(physW, physH, cornerRadius).getPoints().map(p => ({ x: p.x, y: p.y }));
+    const ring = cutterRing(ringOutline, cutter.clearance, cutter.wallThickness);
+    if (ring) {
+      const { bottom, top } = cutterZRange(baseThickness, cutter.gripHeight, cutter.clayThickness);
+      const geo = new ExtrudeGeometry(pointsToShape(ring.outer, [ring.inner]), { depth: top - bottom, bevelEnabled: false });
+      cutterMeshes.push(serializeGeo(geo, "cutter", 0xc4521a, 0, 0, bottom));
+    }
+  }
+
   const transferable: Transferable[] = [];
-  for (const m of meshes) {
+  for (const m of [...meshes, ...cutterMeshes]) {
     transferable.push(m.position.buffer as ArrayBuffer);
     transferable.push(m.normal.buffer as ArrayBuffer);
     if (m.index) transferable.push(m.index.buffer as ArrayBuffer);
   }
 
-  postMessage({ type: "result", meshes, normalColor } satisfies StampGeoMessage, { transfer: transferable });
+  postMessage({ type: "result", meshes, cutterMeshes, normalColor } satisfies StampGeoMessage, { transfer: transferable });
 };
