@@ -62,6 +62,8 @@ declare module "clipper-lib" {
     ): boolean;
     static Area(poly: Path): number;
     static Orientation(poly: Path): boolean;
+    /** 0 = outside, 1 = inside, −1 = on the boundary. */
+    static PointInPolygon(pt: IntPoint, path: Path): number;
     static SimplifyPolygon(poly: Path, fillType: number): Paths;
   }
 

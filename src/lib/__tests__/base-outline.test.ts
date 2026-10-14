@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeBaseOutline, type BaseOutlineInput } from "../base-outline";
 import { cutterRing, cutterZRange } from "../cutter-geometry";
+import { findCorners } from "../sharp-corners";
 
 type Point = { x: number; y: number };
 
@@ -74,6 +75,28 @@ describe("computeBaseOutline", () => {
     // Fidelity 0 becomes a square-cornered plate.
     const plate = computeBaseOutline(input({ fidelity: 0, sharpCorners: true }))!;
     expect(area(plate)).toBeCloseTo(36 * 36, 0);
+  });
+
+  it("doesn't turn tracing noise into spikes with sharpCorners", () => {
+    // A 10 mm circle with ±0.05 mm zigzag: no real corners, so sharp = round.
+    const noisy = Array.from({ length: 400 }, (_, i) => {
+      const a = (i / 400) * Math.PI * 2, r = 10 + (i % 2 ? 0.05 : -0.05);
+      return { x: 15 + r * Math.cos(a), y: 15 + r * Math.sin(a) };
+    });
+    expect(findCorners(noisy)).toHaveLength(0);
+    const shapes = [{ outer: noisy, holes: [] }];
+    const round = computeBaseOutline(input({ shapes, fidelity: 100 }))!;
+    const sharp = computeBaseOutline(input({ shapes, fidelity: 100, sharpCorners: true }))!;
+    expect(Math.abs(area(sharp) - area(round))).toBeLessThan(1);
+  });
+
+  it("keeps a thin tip pointed but caps its length", () => {
+    // 20° spike pointing right, tip at x = 30. A full miter would reach 3 / sin(10°) ≈ 17 mm past it.
+    const spike = pts([[0, 10], [30, 15], [0, 20]]);
+    const outline = computeBaseOutline(input({ shapes: [{ outer: spike, holes: [] }], fidelity: 100, sharpCorners: true }))!;
+    const reach = bbox(outline).x1 - (30 + 3); // plate coordinates: + margin
+    expect(reach).toBeGreaterThan(3 * 1.5); // well past the round offset (3 mm)
+    expect(reach).toBeLessThanOrEqual(3 * 3 + 0.01); // capped at 3 × margin
   });
 
   it("never shrinks as fidelity drops", () => {
