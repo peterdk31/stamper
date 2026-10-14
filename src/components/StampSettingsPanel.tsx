@@ -44,6 +44,7 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
       <h2 className="text-lg font-semibold">Stamp Settings</h2>
 
       <fieldset className="space-y-3">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Design area</legend>
         <div className="flex items-center gap-1 text-sm">
           <span className="text-sm font-medium text-gray-700 mr-2">Fit to</span>
           {(["width", "height", "off"] as const).map((dim) => (
@@ -67,6 +68,10 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
         <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
           onChange={(v) => update({ height: v })}
           disabled={settings.fitDimension === "width"} />
+        <p className="text-xs text-gray-500">
+          Plate: {((settings.width + settings.margin * 2) / 10).toFixed(1)} × {((settings.height + settings.margin * 2) / 10).toFixed(1)} cm
+          {" "}(design area + 2 × {settings.margin} mm margin)
+        </p>
       </fieldset>
 
       <div className="border-t pt-3">

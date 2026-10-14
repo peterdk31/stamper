@@ -6,6 +6,7 @@ import { useRef, useMemo, useEffect, useState, memo } from "react";
 import * as THREE from "three";
 import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
+import DimensionOverlay, { IMPRINT_COLOR, PLATE_COLOR, AREA_COLOR } from "./DimensionOverlay";
 import type { StampSettings, ThinFeatureMap, FeatureChanges } from "@/types/stamp";
 import type { StampGeoMessage } from "@/lib/stamp-geometry.worker";
 
@@ -20,6 +21,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
   const stampRef = useRef<THREE.Group>(null);
   const geoWorkerRef = useRef<Worker | null>(null);
   const [stampGroup, setStampGroup] = useState<THREE.Group | null>(null);
+  const [showDimensions, setShowDimensions] = useState(true);
 
   useEffect(() => {
     const shapeData = shapes.map(s => ({
@@ -168,11 +170,31 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
           <directionalLight position={[50, 50, 50]} intensity={1} />
           {stampGroup && <primitive ref={stampRef} object={stampGroup} />}
           {handleGroup && <primitive object={handleGroup} />}
+          {/* Sibling of the stamp group, not a child, so it never ends up in the STL */}
+          {showDimensions && <DimensionOverlay settings={settings} shapes={shapes} />}
           <OrbitControls target={center} />
           <gridHelper args={[200, 20, 0x444444, 0x222222]} rotation={[Math.PI / 2, 0, 0]} />
         </Canvas>
 
-        <div className="absolute bottom-2 left-2 right-2 flex justify-end gap-2 sm:left-auto sm:bottom-3 sm:right-3">
+        <div className="absolute top-2 left-2 z-20 rounded bg-gray-900/80 px-2 py-1 text-xs text-gray-200 select-none sm:top-3 sm:left-3">
+          <label className="flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={showDimensions}
+              onChange={e => setShowDimensions(e.target.checked)}
+            />
+            Dimensions
+          </label>
+          {showDimensions && (
+            <ul className="mt-1 space-y-0.5 text-gray-300">
+              <LegendItem color={IMPRINT_COLOR}>imprint in clay</LegendItem>
+              <LegendItem color={PLATE_COLOR}>plate (design area + 2 × margin)</LegendItem>
+              <LegendItem color={AREA_COLOR} dashed>design area (Width × Height)</LegendItem>
+            </ul>
+          )}
+        </div>
+
+        <div className="absolute z-20 bottom-2 left-2 right-2 flex justify-end gap-2 sm:left-auto sm:bottom-3 sm:right-3">
           <button
             onClick={handleExportStamp}
             className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm"
@@ -230,6 +252,15 @@ function FeatureChangesLegend({ changes, residual }: { changes: FeatureChanges; 
         </p>
       )}
     </div>
+  );
+}
+
+function LegendItem({ color, dashed, children }: { color: string; dashed?: boolean; children: React.ReactNode }) {
+  return (
+    <li className="flex items-center gap-1.5">
+      <span className="inline-block w-3" style={{ borderTop: `2px ${dashed ? "dashed" : "solid"} ${color}` }} />
+      {children}
+    </li>
   );
 }
 
