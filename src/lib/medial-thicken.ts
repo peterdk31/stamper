@@ -788,8 +788,7 @@ function junctionFill(pushed: ShapeData[], discLoops: Point[][], targetWidth: nu
   const c = new ClipperLib.Clipper();
   c.AddPaths(normalizeEvenOdd(discLoops.map(toClipperPath)), ClipperLib.PolyType.ptSubject, true);
   c.AddPaths(pushedPaths, ClipperLib.PolyType.ptClip, true);
-  const tree = new ClipperLib.PolyTree();
-  c.Execute(ClipperLib.ClipType.ctDifference, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftEvenOdd);
+  const tree = executeToTree(c, ClipperLib.ClipType.ctDifference, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftEvenOdd);
   const pieces: ShapeData[] = [];
   polyTreeToShapes(tree, pieces);
 
@@ -831,6 +830,24 @@ function normalizeEvenOdd(paths: ClipperLib.Paths): ClipperLib.Paths {
   return out;
 }
 
+/**
+ * Runs the clip into a PolyTree. Clipper fixes up the tree's nesting every
+ * time it splits an output polygon, testing every other output ring with a
+ * full point-in-polygon walk. Pushed edges lying on the original outline
+ * split off hundreds of rounding slivers, which took minutes (a 0.8 mm nozzle
+ * on a line-art tree). So clip to flat paths, drop the slivers, and nest the
+ * rest in a second, cheap union.
+ */
+function executeToTree(c: ClipperLib.Clipper, clipType: number, subjFill: number, clipFill: number): ClipperLib.PolyTree {
+  const flat: ClipperLib.Paths = [];
+  c.Execute(clipType, flat, subjFill, clipFill);
+  const nest = new ClipperLib.Clipper();
+  nest.AddPaths(flat.filter((p) => Math.abs(ClipperLib.Clipper.Area(p)) >= MIN_AREA_SQ), ClipperLib.PolyType.ptSubject, true);
+  const tree = new ClipperLib.PolyTree();
+  nest.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  return tree;
+}
+
 function polyTreeToShapes(node: ClipperLib.PolyNode, out: ShapeData[]): void {
   for (const outerNode of node.Childs()) {
     const outerPath = outerNode.Contour();
@@ -869,8 +886,7 @@ function unionWith(shapes: ShapeData[], loops: Point[][], mode: "solid" | "neste
 
   const c = new ClipperLib.Clipper();
   c.AddPaths(subject, ClipperLib.PolyType.ptSubject, true);
-  const tree = new ClipperLib.PolyTree();
-  c.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  const tree = executeToTree(c, ClipperLib.ClipType.ctUnion, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
 
   const out: ShapeData[] = [];
   polyTreeToShapes(tree, out);
