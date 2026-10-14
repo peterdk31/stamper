@@ -113,6 +113,8 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
                 onChange={(e) => updateCutter({ sharpCorners: e.target.checked })} />
               Sharp corners
             </label>
+            <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
+              onChange={(v) => update({ margin: v })} />
             <SliderInput label="Clay thickness" unit="mm" value={cutter.clayThickness} min={2} max={20} step={0.5}
               onChange={(v) => updateCutter({ clayThickness: v })} />
             {reliefTooDeep ? (
