@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
 import { FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
+import { fontFromBuffer } from "../font-manager";
 import { medialThicken, makeGrid, rasterizeShapes, findThinRidges, closingFill } from "../medial-thicken";
 import { squaredEDT, initEDT } from "../edt";
 import type { Point, ShapeData } from "../clipper-thicken";
@@ -193,9 +194,14 @@ describe("medialThicken — synthetic shapes", () => {
 });
 
 describe("medialThicken — small text", () => {
-  const loader = new FontLoader();
-  const load = (file: string) =>
-    loader.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../public/fonts", file), "utf8")));
+  // Bundled TTFs, plus Droid Serif kept as a typeface.js fixture (Noto Serif's "s" still leaves residue)
+  const load = (file: string) => {
+    if (file.endsWith(".json")) {
+      return new FontLoader().parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "fixtures", file), "utf8")));
+    }
+    const buf = fs.readFileSync(path.resolve(__dirname, "../../../public/fonts", file));
+    return fontFromBuffer(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  };
 
   const glyphShapes = (file: string, text: string, size: number): ShapeData[] =>
     load(file).generateShapes(text, size).map((s) => ({
@@ -205,7 +211,7 @@ describe("medialThicken — small text", () => {
 
   for (const [file, size] of [
     ["droid_serif_regular.typeface.json", 2.5],
-    ["nunito_regular.typeface.json", 2],
+    ["nunito-regular.ttf", 2],
   ] as const) {
     it(`${file} at ${size}mm has no thin features left`, () => {
       const shapes = glyphShapes(file, "aeo8Rgs", size);

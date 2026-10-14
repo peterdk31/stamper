@@ -2,7 +2,8 @@
 
 import { useRef } from "react";
 import type { StampText, TextAlign } from "@/types/stamp";
-import { loadCustomFont, type FontEntry } from "@/lib/font-manager";
+import { DEFAULT_FONT, loadCustomFont, type FontEntry } from "@/lib/font-manager";
+import FontPicker from "./FontPicker";
 import SliderInput from "./SliderInput";
 
 interface Props {
@@ -17,7 +18,7 @@ export default function TextEditor({
   texts, availableFonts, hasImage, onChange, onFontLoaded,
 }: Props) {
   const fontInputRef = useRef<HTMLInputElement>(null);
-  const defaultFont = availableFonts[0] || "Nunito";
+  const defaultFont = availableFonts[0] || DEFAULT_FONT;
 
   function addText() {
     onChange([...texts, {
@@ -99,15 +100,12 @@ export default function TextEditor({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-gray-500">Font</label>
-              <select
+              <FontPicker
                 value={text.fontFamily}
-                onChange={(e) => updateText(i, { fontFamily: e.target.value })}
-                className="w-full rounded border-gray-300 shadow-sm text-sm px-2 py-1 border"
-              >
-                {availableFonts.map((f) => (
-                  <option key={f} value={f}>{f}</option>
-                ))}
-              </select>
+                fonts={availableFonts}
+                sample={text.content}
+                onChange={(fontFamily) => updateText(i, { fontFamily })}
+              />
             </div>
 
             {hasImage && (

@@ -11,7 +11,7 @@ Ceramic Stamps is a client-only Next.js web app that generates STL files for 3D-
 - `npm run dev` — start dev server (Turbopack)
 - `npm run build` — production build (also runs TypeScript type-checking)
 - `npm run lint` — ESLint
-- No test framework is configured yet
+- `npm test` — Vitest (tests in `src/lib/__tests__/`)
 
 ## Architecture
 
@@ -85,7 +85,7 @@ Sources (parallel):                Processing (sequential):           Output:
   - `StampSettingsPanel.tsx` — stamp dimensions, nozzle preset, design mode, corner radius, handle mount toggle + thread settings
   - `ImageUpload.tsx` — drag/drop for raster + SVG, simplification slider
   - `TextEditor.tsx` — text entries with font selector, preset layouts, font upload
-- `public/fonts/` — 5 bundled typeface.js JSON fonts (helvetiker, droid serif, optimer)
+- `public/fonts/` — 20 bundled static TTFs from Google Fonts (licences in `licenses/`), listed with categories in `BUNDLED_FONTS` (`font-manager.ts`). Loaded via opentype.js like uploaded fonts, and registered as `FontFace`s so `FontPicker.tsx` can preview each font in its own face
 
 ### Important constraints
 
