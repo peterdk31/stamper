@@ -113,6 +113,11 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
                 onChange={(e) => updateCutter({ sharpCorners: e.target.checked })} />
               Sharp corners
             </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={cutter.invertInside}
+                onChange={(e) => updateCutter({ invertInside: e.target.checked })} />
+              Invert inside outline
+            </label>
             <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
               onChange={(v) => update({ margin: v })} />
             <SliderInput label="Clay thickness" unit="mm" value={cutter.clayThickness} min={2} max={20} step={0.5}

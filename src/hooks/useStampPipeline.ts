@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { StampSettings, StampText, DesignData, ThinFeatureMap } from "@/types/stamp";
 import type { StampShapeData } from "@/types/stamp";
 import { rasterToDesignData, designDataToShapes } from "@/lib/design-data";
+import { invertWithinSilhouette } from "@/lib/invert-design";
 import { getFontCache } from "@/lib/font-manager";
 import { computeRequiredHeight, computeRequiredWidth } from "@/lib/text-to-shapes";
 import { textToDesignData } from "@/lib/pipeline/text";
@@ -329,17 +330,20 @@ export function useStampPipeline(inputs: PipelineInputs): PipelineOutputs {
   }, [texts, fontsReady, effectiveSettings.width, effectiveSettings.height, hasImage]);
 
   // 4. Image → DesignData (rendered within computed image zone)
+  const invertInside = effectiveSettings.cutterEnabled && effectiveSettings.cutterConfig.invertInside;
   const imageData = useMemo<DesignData | null>(() => {
     if (trace.rawShapes && trace.rawImageDims) {
       const hasText = textLayout.textData !== null;
-      return rasterToDesignData(
+      const data = rasterToDesignData(
         trace.rawShapes, trace.rawImageDims,
         effectiveSettings.width, effectiveSettings.height,
         hasText ? textLayout.imageZone : undefined,
       );
+      // Cutter only: invert within the silhouette so the background stays empty
+      return invertInside ? invertWithinSilhouette(data) : data;
     }
     return null;
-  }, [trace.rawShapes, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData]);
+  }, [trace.rawShapes, trace.rawImageDims, effectiveSettings.width, effectiveSettings.height, textLayout.imageZone, textLayout.textData, invertInside]);
 
   // 5. Merge sources (image + text)
   const stepFlags: StepFlags = { thickenEnabled, tracerAlgorithm, thickenAlgorithm };
