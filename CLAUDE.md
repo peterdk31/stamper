@@ -82,11 +82,14 @@ Sources (parallel):                Processing (sequential):           Output:
   - `potrace-trace.ts` — Potrace-style tracer core (optimal polygon + vertex adjustment), used by `potrace.worker.ts`
   - `curve-fit.ts` — Potrace curve fitting: polygon → Bézier curves that keep sharp corners and don't shrink the shape. Applied by both tracers; there is no separate smoothing step.
   - `medial-thicken.ts` — default thickener: widens every stroke thinner than the slicer's min perimeter width (`minPerimeterWidthPct` of nozzle) by pushing its outline edges straight outward (straight sides stay straight, square ends stay square), fills junction notches from a disc-grown fallback, rounds sharp tips, and builds the widened/rescued overlay. Pure functions, tested in `__tests__/medial-thicken.test.ts`.
-- `src/components/` — React UI panels:
-  - `StampPreview.tsx` — side-by-side stamp + clay impression canvases, export buttons. Loaded with `next/dynamic` (SSR disabled).
-  - `StampSettingsPanel.tsx` — stamp dimensions, nozzle preset, design mode, corner radius, handle mount toggle + thread settings
-  - `ImageUpload.tsx` — drag/drop for raster + SVG, simplification slider
-  - `TextEditor.tsx` — text entries with font selector, preset layouts, font upload
+- `src/components/` — React UI. The sidebar is collapsible sections in workflow order (Design, Size, Base, Handle, Clay cutter, Printer); each shows its common controls and hides the rest behind a "More" disclosure, and shows a one-line summary while closed:
+  - `ui.tsx` — shared `Toggle`, `ToggleRow`, `Section` (collapsible, header summary + optional header toggle), `More`, `Hint`. Use these instead of hand-rolling switches/disclosures
+  - `SliderInput.tsx` — slider with a typeable value field; `onInput` fires during drag for cheap live previews, `onChange` on commit
+  - `StampPreview.tsx` — 3D stamp preview, thin-feature warnings with fix buttons, export bar below the canvas. Loaded with `next/dynamic` (SSR disabled).
+  - `StampSettingsPanel.tsx` — renders the Size … Printer sections. "Keep proportions" lock = `fitDimension !== "off"`; editing W or H while locked sets `fitDimension` to that dimension
+  - `ImageUpload.tsx` — drop zone, compact original + B/W thumbnails, threshold; brightness/contrast/invert/color removal under "More image options"
+  - `TextEditor.tsx` — text entries (font, size; letter spacing + position under "More"). Font upload lives at the bottom of `FontPicker`'s list
+- **`?dev` URL flag** — shows the tracer and thicken-variant pickers and developer-facing warnings. Keep algorithm choices out of the normal UI.
 - `public/fonts/` — 20 bundled static TTFs from Google Fonts (licences in `licenses/`), listed with categories in `BUNDLED_FONTS` (`font-manager.ts`). Loaded via opentype.js like uploaded fonts, and registered as `FontFace`s so `FontPicker.tsx` can preview each font in its own face
 
 ### Important constraints

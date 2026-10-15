@@ -3,6 +3,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ColorMask } from "@/types/stamp";
 import ColorPickerModal from "./ColorPickerModal";
+import SliderInput from "./SliderInput";
+import { More } from "./ui";
 
 interface Props {
   imageDataUrl: string | null;
@@ -22,6 +24,8 @@ interface Props {
   onColorMasksChange?: (value: ColorMask[]) => void;
   invert?: boolean;
   onInvertChange?: (value: boolean) => void;
+  /** Extra controls (dev-only tracer picker) shown under the image options. */
+  extraOptions?: React.ReactNode;
 }
 
 interface LocalAdj {
@@ -77,28 +81,18 @@ export default function ImageUpload({
   contrast = 0, onContrastChange,
   colorMasks = [], onColorMasksChange,
   invert = false, onInvertChange,
+  extraOptions,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pixelCacheRef = useRef<ImageData | null>(null);
-  const isDraggingRef = useRef(false);
-  const localRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, invert });
   const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, invert });
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
 
   useEffect(() => {
     propsRef.current = { threshold, brightness, contrast, colorMasks, invert };
   }, [threshold, brightness, contrast, colorMasks, invert]);
-
-  const thresholdLabelRef = useRef<HTMLSpanElement>(null);
-  const thresholdSliderRef = useRef<HTMLInputElement>(null);
-  const brightnessLabelRef = useRef<HTMLSpanElement>(null);
-  const brightnessSliderRef = useRef<HTMLInputElement>(null);
-  const contrastLabelRef = useRef<HTMLSpanElement>(null);
-  const contrastSliderRef = useRef<HTMLInputElement>(null);
-
-
-  const [adjustOpen, setAdjustOpen] = useState(false);
 
   function drawPreview(adj: LocalAdj) {
     const canvas = canvasRef.current;
@@ -134,9 +128,11 @@ export default function ImageUpload({
       dst[i + 3] = 255;
     }
     ctx.putImageData(out, 0, 0);
-    if (thresholdLabelRef.current) thresholdLabelRef.current.textContent = String(adj.threshold);
-    if (brightnessLabelRef.current) brightnessLabelRef.current.textContent = String(adj.brightness);
-    if (contrastLabelRef.current) contrastLabelRef.current.textContent = String(adj.contrast);
+  }
+
+  // Redraw the B/W preview on every slider movement, before the value is committed
+  function preview(partial: Partial<LocalAdj>) {
+    drawPreview({ ...propsRef.current, ...partial });
   }
 
   useEffect(() => {
@@ -162,13 +158,7 @@ export default function ImageUpload({
   }, [imageDataUrl, svgText]);
 
   useEffect(() => {
-    if (!isDraggingRef.current) {
-      const adj = { threshold, brightness, contrast, colorMasks, invert };
-      drawPreview(adj);
-      if (thresholdSliderRef.current) thresholdSliderRef.current.value = String(threshold);
-      if (brightnessSliderRef.current) brightnessSliderRef.current.value = String(brightness);
-      if (contrastSliderRef.current) contrastSliderRef.current.value = String(contrast);
-    }
+    drawPreview({ threshold, brightness, contrast, colorMasks, invert });
   }, [threshold, brightness, contrast, colorMasks, invert]);
 
   const handleFile = useCallback(
@@ -179,6 +169,7 @@ export default function ImageUpload({
         reader.onload = () => {
           onSvgChange(reader.result as string);
           onImageChange(null);
+          setFileName(file.name);
         };
         reader.readAsText(file);
       } else if (file.type.startsWith("image/")) {
@@ -186,6 +177,7 @@ export default function ImageUpload({
         reader.onload = () => {
           onImageChange(reader.result as string, baseName);
           onSvgChange(null);
+          setFileName(file.name);
         };
         reader.readAsDataURL(file);
       }
@@ -205,76 +197,18 @@ export default function ImageUpload({
   function handleClear() {
     onImageChange(null);
     onSvgChange(null);
+    setFileName(null);
   }
 
-  function startDrag() {
-    isDraggingRef.current = true;
-    localRef.current = { ...propsRef.current };
-  }
-
-  function redrawLocal() {
-    drawPreview(localRef.current);
-  }
-
-  const hasContent = imageDataUrl || svgText;
+  const hasContent = !!(imageDataUrl || svgText);
   const showRasterControls = hasContent && onThresholdChange;
-  const hasAdjustments = threshold !== 128 || brightness !== 0 || contrast !== 0 || colorMasks.length > 0 || invert;
+  const hasAdjustments = brightness !== 0 || contrast !== 0 || colorMasks.length > 0 || invert;
 
-  const imageSourceForModal = imageDataUrl ?? (svgText ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}` : null);
+  const imageSource = imageDataUrl ?? (svgText ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}` : null);
 
   return (
     <>
-    <div className="p-4 bg-white rounded-lg shadow space-y-3">
-      <h2 className="text-lg font-semibold">Outline Image</h2>
-
-      <div
-        onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
-        onClick={() => !isProcessing && inputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-lg p-2 text-center transition-colors ${
-          isProcessing
-            ? "border-amber-400 cursor-wait"
-            : "border-gray-300 cursor-pointer hover:border-amber-500"
-        }`}
-      >
-        {imageDataUrl || svgText ? (
-          <div className="relative">
-            <div className="flex gap-2 justify-center items-center">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imageDataUrl ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText!)}`}
-                alt="Original"
-                className="max-h-96 max-w-[48%] object-contain"
-              />
-              <canvas ref={canvasRef} className="max-h-96 max-w-[48%]" />
-            </div>
-            {isProcessing && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white/70">
-                <div className="h-6 w-6 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            )}
-          </div>
-        ) : isProcessing ? (
-          <div className="space-y-3">
-            <div className="flex justify-center">
-              <div className="h-8 w-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-            <p className="text-sm text-gray-600">{progressStage}</p>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-amber-500 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${Math.round(progress * 100)}%` }}
-              />
-            </div>
-            <p className="text-xs text-gray-400">{Math.round(progress * 100)}%</p>
-          </div>
-        ) : (
-          <p className="text-gray-500 text-sm">
-            Drop an image or SVG here, or click to upload
-          </p>
-        )}
-      </div>
-
+    <div className="space-y-3">
       <input
         ref={inputRef}
         type="file"
@@ -283,164 +217,115 @@ export default function ImageUpload({
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) handleFile(file);
+          e.target.value = "";
         }}
       />
 
-      <div className="h-6">
-        {hasContent && !isProcessing && (
-          <button
-            onClick={handleClear}
-            className="text-sm text-red-600 hover:text-red-800"
-          >
-            Remove image
-          </button>
-        )}
-      </div>
-
-      {showRasterControls && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setAdjustOpen((v) => !v)}
-            className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-800"
-          >
-            <span className={`inline-block transition-transform ${adjustOpen ? "rotate-90" : ""}`}>&#9654;</span>
-            <span>Image Adjustments</span>
-            {hasAdjustments && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />}
-          </button>
-
-          {adjustOpen && (
-            <div className="mt-2 space-y-3 pl-1">
-              {hasAdjustments && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onThresholdChange?.(128);
-                    onBrightnessChange?.(0);
-                    onContrastChange?.(0);
-                    onColorMasksChange?.([]);
-                    onInvertChange?.(false);
-                  }}
-                  className="text-xs text-amber-600 hover:text-amber-800"
-                >
-                  Reset all
-                </button>
-              )}
-              <div className="space-y-1">
-                <div className="flex justify-between text-sm text-gray-600">
-                  <span>Threshold</span>
-                  <span ref={thresholdLabelRef}>{threshold}</span>
-                </div>
-                <input
-                  ref={thresholdSliderRef}
-                  type="range"
-                  min={1}
-                  max={255}
-                  defaultValue={threshold}
-                  onPointerDown={startDrag}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    localRef.current.threshold = v;
-                    redrawLocal();
-                    if (!isDraggingRef.current) onThresholdChange!(v);
-                  }}
-                  onPointerUp={() => {
-                    isDraggingRef.current = false;
-                    onThresholdChange!(localRef.current.threshold);
-                  }}
-                  className="w-full accent-amber-500"
-                />
+      {hasContent ? (
+        <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()} className="space-y-2">
+          <div className="relative flex gap-2 rounded border border-gray-200 bg-gray-50 p-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageSource!} alt="Original" title="Original"
+              className="h-28 min-w-0 flex-1 object-contain" />
+            <canvas ref={canvasRef} title="What gets traced"
+              className="h-28 min-w-0 flex-1 object-contain" />
+            {isProcessing && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/70">
+                <div className="h-6 w-6 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
               </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-sm text-gray-600">
-                  <span>Brightness</span>
-                  <span ref={brightnessLabelRef}>{brightness}</span>
-                </div>
-                <input
-                  ref={brightnessSliderRef}
-                  type="range"
-                  min={-100}
-                  max={100}
-                  defaultValue={brightness}
-                  onPointerDown={startDrag}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    localRef.current.brightness = v;
-                    redrawLocal();
-                    if (!isDraggingRef.current) onBrightnessChange?.(v);
-                  }}
-                  onPointerUp={() => {
-                    isDraggingRef.current = false;
-                    onBrightnessChange?.(localRef.current.brightness);
-                  }}
-                  className="w-full accent-amber-500"
-                />
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="flex-1 truncate text-gray-600" title={fileName ?? undefined}>
+              {fileName ?? (svgText ? "SVG" : "Image")}
+            </span>
+            <button type="button" onClick={() => inputRef.current?.click()} disabled={isProcessing}
+              className="text-amber-700 hover:text-amber-900 disabled:opacity-50">
+              Replace
+            </button>
+            <button type="button" onClick={handleClear} disabled={isProcessing}
+              className="text-red-600 hover:text-red-800 disabled:opacity-50">
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onClick={() => !isProcessing && inputRef.current?.click()}
+          className={`rounded-lg border-2 border-dashed p-4 text-center ${
+            isProcessing ? "border-amber-400 cursor-wait" : "border-gray-300 cursor-pointer hover:border-amber-500"
+          }`}
+        >
+          {isProcessing ? (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">{progressStage}</p>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="bg-amber-500 h-2 rounded-full" style={{ width: `${Math.round(progress * 100)}%` }} />
               </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-sm text-gray-600">
-                  <span>Contrast</span>
-                  <span ref={contrastLabelRef}>{contrast}</span>
-                </div>
-                <input
-                  ref={contrastSliderRef}
-                  type="range"
-                  min={-100}
-                  max={100}
-                  defaultValue={contrast}
-                  onPointerDown={startDrag}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    localRef.current.contrast = v;
-                    redrawLocal();
-                    if (!isDraggingRef.current) onContrastChange?.(v);
-                  }}
-                  onPointerUp={() => {
-                    isDraggingRef.current = false;
-                    onContrastChange?.(localRef.current.contrast);
-                  }}
-                  className="w-full accent-amber-500"
-                />
-              </div>
-              <div className="pt-1 border-t border-gray-200">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(true)}
-                    className="text-sm text-amber-600 hover:text-amber-800"
-                  >
-                    Pick colors to remove
-                  </button>
-                  {colorMasks.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {colorMasks.map((mask, i) => (
-                        <div
-                          key={i}
-                          className="w-5 h-5 rounded-full border border-gray-300"
-                          style={{ backgroundColor: `hsl(${mask.hue}, ${mask.saturation}%, ${mask.lightness}%)` }}
-                          title={`${Math.round(mask.hue)}° ±${mask.tolerance}`}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={invert}
-                  onChange={(e) => onInvertChange?.(e.target.checked)}
-                  className="accent-amber-500"
-                />
-                Invert
-              </label>
             </div>
+          ) : (
+            <>
+              <p className="text-sm text-gray-700">Drop an image or SVG here, or click to upload</p>
+              <p className="mt-0.5 text-xs text-gray-400">Dark areas become the raised design</p>
+            </>
           )}
         </div>
       )}
+
+      {showRasterControls && (
+        <>
+          <SliderInput label="Threshold" value={threshold} min={1} max={255} step={1}
+            onInput={(v) => preview({ threshold: v })}
+            onChange={(v) => onThresholdChange!(v)} />
+
+          <More label="More image options" dot={hasAdjustments}>
+            <SliderInput label="Brightness" value={brightness} min={-100} max={100} step={1}
+              onInput={(v) => preview({ brightness: v })}
+              onChange={(v) => onBrightnessChange?.(v)} />
+            <SliderInput label="Contrast" value={contrast} min={-100} max={100} step={1}
+              onInput={(v) => preview({ contrast: v })}
+              onChange={(v) => onContrastChange?.(v)} />
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={invert} onChange={(e) => onInvertChange?.(e.target.checked)}
+                className="accent-amber-700" />
+              Invert (light areas become the design)
+            </label>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setPickerOpen(true)}
+                className="text-sm text-amber-700 hover:text-amber-900">
+                Pick colors to remove…
+              </button>
+              {colorMasks.map((mask, i) => (
+                <span key={i} className="w-4 h-4 rounded-full border border-gray-300"
+                  style={{ backgroundColor: `hsl(${mask.hue}, ${mask.saturation}%, ${mask.lightness}%)` }}
+                  title={`${Math.round(mask.hue)}° ±${mask.tolerance}`} />
+              ))}
+            </div>
+            {(hasAdjustments || threshold !== 128) && (
+              <button
+                type="button"
+                onClick={() => {
+                  onThresholdChange?.(128);
+                  onBrightnessChange?.(0);
+                  onContrastChange?.(0);
+                  onColorMasksChange?.([]);
+                  onInvertChange?.(false);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-800 underline"
+              >
+                Reset image options
+              </button>
+            )}
+            {extraOptions}
+          </More>
+        </>
+      )}
     </div>
-    {pickerOpen && imageSourceForModal && onColorMasksChange && (
+    {pickerOpen && imageSource && onColorMasksChange && (
       <ColorPickerModal
-        imageSource={imageSourceForModal}
+        imageSource={imageSource}
         colorMasks={colorMasks}
         onColorMasksChange={onColorMasksChange}
         onClose={() => setPickerOpen(false)}

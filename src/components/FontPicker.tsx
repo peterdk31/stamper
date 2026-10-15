@@ -9,10 +9,12 @@ interface Props {
   /** Text drawn in each font; falls back to the font name when empty. */
   sample: string;
   onChange: (font: string) => void;
+  /** Adds an "Upload font…" entry at the end of the list. */
+  onUpload?: () => void;
 }
 
 /** Font dropdown where every option is rendered in its own font. */
-export default function FontPicker({ value, fonts, sample, onChange }: Props) {
+export default function FontPicker({ value, fonts, sample, onChange, onUpload }: Props) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -137,6 +139,17 @@ export default function FontPicker({ value, fonts, sample, onChange }: Props) {
               </ul>
             </li>
           ))}
+          {onUpload && (
+            <li role="presentation" className="border-t border-gray-200 mt-1 pt-1">
+              <button
+                type="button"
+                onClick={() => { setOpen(false); onUpload(); }}
+                className="w-full px-2 py-1.5 text-left text-sm text-amber-700 hover:bg-gray-100"
+              >
+                Upload font (.ttf, .otf)…
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </div>

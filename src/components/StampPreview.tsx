@@ -34,9 +34,12 @@ interface Props {
   shapes: THREE.Shape[];
   exportName: string;
   thinFeatureMap: ThinFeatureMap | null;
+  /** Turns thickening on; offered when the slicer would widen or drop strokes. */
+  onEnableThicken: () => void;
+  dev: boolean;
 }
 
-function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
+function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableThicken, dev }: Props) {
   const stampRef = useRef<THREE.Group>(null);
   const geoWorkerRef = useRef<Worker | null>(null);
   const [stampGroup, setStampGroup] = useState<THREE.Group | null>(null);
@@ -186,7 +189,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-[60vh] lg:sticky lg:top-6 lg:h-[calc(100vh-120px)]">
+    <div className="flex flex-col gap-2 h-full">
       <div className="relative bg-gray-900 rounded-lg overflow-hidden flex-1 min-h-0">
         <Canvas camera={{ position: [60, 60, 60], fov: 45 }}>
           <ambientLight intensity={0.5} />
@@ -227,55 +230,75 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
             </label>
           )}
         </div>
-
-        <div className="absolute z-20 bottom-2 left-2 right-2 flex justify-end gap-2 sm:left-auto sm:bottom-3 sm:right-3">
-          <button
-            onClick={handleExportStamp}
-            className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm"
-          >
-            Export Stamp STL
-          </button>
-          {settings.threadEnabled && (
-            <button
-              onClick={handleExportHandle}
-              className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm"
-            >
-              Export Handle STL
-            </button>
-          )}
-          {settings.cutterEnabled && (
-            <button
-              onClick={handleExportCutter}
-              disabled={!cutterGroup}
-              className="px-2.5 py-1.5 bg-amber-700/90 text-white rounded hover:bg-amber-800 font-medium text-xs sm:text-sm sm:px-3 backdrop-blur-sm disabled:opacity-50"
-            >
-              Export Cutter STL
-            </button>
-          )}
-        </div>
       </div>
 
       {thinFeatureMap?.changes
-        ? <FeatureChangesLegend changes={thinFeatureMap.changes} residual={thinFeatureMap.hasThinFeatures} />
+        ? <FeatureChangesLegend changes={thinFeatureMap.changes} residual={thinFeatureMap.hasThinFeatures}
+            onEnableThicken={onEnableThicken} dev={dev} />
         : thinFeatureMap?.hasThinFeatures && (
-          <p className="mt-2 text-sm text-red-600">
-            Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red)
+          <p className="text-sm text-red-600">
+            Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red).
+            {" "}<FixButton onClick={onEnableThicken}>Thicken them</FixButton>
           </p>
         )}
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 shadow">
+        <span className="text-sm font-semibold text-gray-700 mr-auto">Export STL</span>
+        <ExportButton onClick={handleExportStamp} disabled={!stampGroup}>Stamp</ExportButton>
+        {settings.threadEnabled && <ExportButton onClick={handleExportHandle}>Handle</ExportButton>}
+        {settings.cutterEnabled && <ExportButton onClick={handleExportCutter} disabled={!cutterGroup}>Cutter</ExportButton>}
+      </div>
     </div>
   );
 }
 
-function FeatureChangesLegend({ changes, residual }: { changes: FeatureChanges; residual: boolean }) {
+function ExportButton({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-700 text-white rounded hover:bg-amber-800 font-medium text-sm disabled:opacity-50"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14" />
+      </svg>
+      {children}
+    </button>
+  );
+}
+
+function FixButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="ml-1 rounded border border-current px-1.5 py-px text-xs font-medium hover:bg-white">
+      {children}
+    </button>
+  );
+}
+
+function scrollToSize() {
+  document.getElementById("size")?.scrollIntoView({ block: "start" });
+}
+
+function FeatureChangesLegend({ changes, residual, onEnableThicken, dev }: {
+  changes: FeatureChanges;
+  residual: boolean;
+  onEnableThicken: () => void;
+  dev: boolean;
+}) {
   const target = changes.targetWidth.toFixed(2);
   const minFeature = changes.minFeatureSize.toFixed(2);
   if (!changes.widened && !changes.rescued) return null;
   return (
-    <div className="mt-2 space-y-0.5 text-sm">
+    <div className="space-y-0.5 text-sm">
       {residual && (
         <p className="text-purple-700">
           <Swatch className="bg-purple-600" />
-          Still thinner than {target} mm after thickening — this is a bug. Try the Clipper or EDT variant.
+          {dev
+            ? `Still thinner than ${target} mm after thickening — this is a bug. Try the Clipper or EDT variant.`
+            : `Some strokes are still thinner than ${target} mm and may not print.`}
+          {!dev && <FixButton onClick={scrollToSize}>Enlarge stamp</FixButton>}
         </p>
       )}
       {changes.widened && (
@@ -284,14 +307,18 @@ function FeatureChangesLegend({ changes, residual }: { changes: FeatureChanges; 
           {changes.thickened
             ? `Widened to ${target} mm — prints, but bolder than designed.`
             : `Thinner than ${target} mm — the slicer will widen these.`}
+          {!changes.thickened && <FixButton onClick={onEnableThicken}>Thicken them</FixButton>}
         </p>
       )}
       {changes.rescued && (
         <p className="text-red-600">
           <Swatch className="bg-red-600" />
           {changes.thickened
-            ? `Was under ${minFeature} mm and would not have printed — now far from 1:1. Enlarge the stamp or text.`
+            ? `Was under ${minFeature} mm and would not have printed — now far from 1:1.`
             : `Thinner than ${minFeature} mm — the slicer will drop these.`}
+          {changes.thickened
+            ? <FixButton onClick={scrollToSize}>Enlarge stamp</FixButton>
+            : <FixButton onClick={onEnableThicken}>Thicken them</FixButton>}
         </p>
       )}
     </div>
