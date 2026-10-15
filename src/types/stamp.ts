@@ -45,6 +45,7 @@ export interface StampSettings {
   height: number; // mm
   baseThickness: number; // mm — the flat backing
   impressionDepth: number; // mm — how deep/tall the design features are
+  draftAngle: number; // degrees — relief walls flare toward the base so it releases from clay; the face stays exact
   cornerRadius: number; // mm — rounded rectangle corners
   fitDimension: FitDimension;
   margin: number; // mm — extra base material around the design (ignored in cutter mode, see plateMargin)
@@ -68,6 +69,7 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   height: 40,
   baseThickness: 6.0,
   impressionDepth: 2.0,
+  draftAngle: 0,
   cornerRadius: 3,
   fitDimension: "width",
   margin: 3,
@@ -96,10 +98,19 @@ export interface StampText {
   align: TextAlign;
 }
 
+export type ProjectImage =
+  | { kind: "raster"; dataUrl: string; fileName: string | null }
+  | { kind: "svg"; svgText: string; fileName: string | null };
+
+/** A saved project — see `lib/project.ts`. */
 export interface StampProject {
+  version: number;
   settings: StampSettings;
-  outlineImageDataUrl: string | null;
+  image: ProjectImage | null;
   texts: StampText[];
+  /** Uploaded fonts the texts use, base64-encoded .ttf/.otf files. Bundled fonts are not embedded. */
+  fonts: { name: string; data: string }[];
+  thickenEnabled: boolean;
 }
 
 export interface StampPoint { x: number; y: number }

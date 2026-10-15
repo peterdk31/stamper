@@ -96,6 +96,13 @@ export default function StampSettingsPanel({
           onChange={(v) => update({ height: v, ...(locked && { fitDimension: "height" }) })} />
         <SliderInput label="Impression depth" unit="mm" value={settings.impressionDepth} min={0.2} max={10} step={0.1}
           onChange={(v) => update({ impressionDepth: v })} />
+        {dev && (
+          <>
+            <SliderInput label="Draft angle (dev)" unit="°" value={settings.draftAngle} min={0} max={20} step={1}
+              onChange={(v) => update({ draftAngle: v })} />
+            <Hint>Relief walls flare toward the base so the stamp releases from clay. The face stays exact.</Hint>
+          </>
+        )}
         <Hint>
           {settings.cutterEnabled
             ? "Design area. The base follows the design outline (see Clay cutter)."

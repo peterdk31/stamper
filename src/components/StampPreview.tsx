@@ -83,6 +83,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
       margin: plateMargin(settings),
       baseThickness: settings.baseThickness,
       impressionDepth: settings.impressionDepth,
+      draftAngle: settings.draftAngle,
       cornerRadius: settings.cornerRadius,
       threadEnabled: settings.threadEnabled,
       threadConfig: settings.threadConfig,
@@ -94,7 +95,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
       if (geoWorkerRef.current === worker) geoWorkerRef.current = null;
     };
   }, [shapes, settings.width, settings.height, settings.margin, settings.baseThickness, settings.impressionDepth,
-      settings.cornerRadius, settings.threadEnabled, settings.threadConfig, settings.cutterEnabled, settings.cutterConfig]);
+      settings.draftAngle, settings.cornerRadius, settings.threadEnabled, settings.threadConfig, settings.cutterEnabled, settings.cutterConfig]);
 
   useEffect(() => {
     if (!stampGroup) return;

@@ -1,10 +1,12 @@
-import { Shape, Path, ExtrudeGeometry } from "three";
+import { Shape, Path, ExtrudeGeometry, type BufferGeometry } from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { CutterConfig, ThreadConfig } from "@/types/stamp";
 import { simplifyShape } from "./simplify";
 import { createRoundedRectShape } from "./stamp-geometry";
 import { createFemaleThreadGeometry } from "./thread-geometry";
 import { computeBaseOutline } from "./base-outline";
 import { cutterRing, cutterZRange } from "./cutter-geometry";
+import { draftLayers } from "./draft-geometry";
 
 interface PointData { x: number; y: number }
 interface ShapeInput { outer: PointData[]; holes: PointData[][] }
@@ -16,6 +18,8 @@ interface GeometryRequest {
   margin: number;
   baseThickness: number;
   impressionDepth: number;
+  /** Degrees; 0 = straight walls. */
+  draftAngle: number;
   cornerRadius: number;
   threadEnabled: boolean;
   threadConfig: ThreadConfig;
@@ -91,7 +95,7 @@ function toShapes(data: ShapeInput[]): Shape[] {
 }
 
 function serializeGeo(
-  geo: ExtrudeGeometry,
+  geo: BufferGeometry,
   name: string, color: number,
   px = 0, py = 0, pz = 0,
   rx = 0, ry = 0, rz = 0,
@@ -109,8 +113,24 @@ function serializeGeo(
 
 const OVERLAP = 0.01;
 
+/** The relief, drafted: a stack of layers, each overlapping the one below so they fuse. */
+function draftedDesignGeometry(shapes: Shape[], depth: number, angle: number): BufferGeometry {
+  const data = shapes.map(s => ({
+    outer: s.getPoints().map(p => ({ x: p.x, y: p.y })),
+    holes: s.holes.map(h => h.getPoints().map(p => ({ x: p.x, y: p.y }))),
+  }));
+  const geos = draftLayers(data, depth, angle).flatMap(({ z0, z1, shapes: layer }) => {
+    if (layer.length === 0) return [];
+    const geo = new ExtrudeGeometry(layer.map(sd => pointsToShape(sd.outer, sd.holes)), {
+      depth: z1 - z0 + OVERLAP, bevelEnabled: false,
+    });
+    return [geo.translate(0, 0, z0)];
+  });
+  return mergeGeometries(geos)!;
+}
+
 self.onmessage = (e: MessageEvent<GeometryRequest>) => {
-  const { shapes: shapeData, width, height, margin, baseThickness, impressionDepth, cornerRadius, threadEnabled, threadConfig, cutter } = e.data;
+  const { shapes: shapeData, width, height, margin, baseThickness, impressionDepth, draftAngle, cornerRadius, threadEnabled, threadConfig, cutter } = e.data;
 
   const physW = width + margin * 2;
   const physH = height + margin * 2;
@@ -164,10 +184,9 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
 
   if (mirrored.length > 0) {
     normalColor = 0x8b5e3c;
-    const geo = new ExtrudeGeometry(mirrored, {
-      depth: impressionDepth + OVERLAP,
-      bevelEnabled: false,
-    });
+    const geo = draftAngle > 0
+      ? draftedDesignGeometry(mirrored, impressionDepth, draftAngle)
+      : new ExtrudeGeometry(mirrored, { depth: impressionDepth + OVERLAP, bevelEnabled: false });
     meshes.push(serializeGeo(geo, "design", normalColor, margin, margin, baseThickness - OVERLAP));
   }
 

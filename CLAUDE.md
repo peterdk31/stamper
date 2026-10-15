@@ -71,6 +71,8 @@ Sources (parallel):                Processing (sequential):           Output:
   - `stamp-geometry.ts` — `createRoundedRectShape()`, shared with `clay-geometry.ts`
   - `base-outline.ts` — cutter mode: stamp base outline = design silhouette grown by `cutterConfig.offset` (miter joins, so corners stay sharp — there is no separate corner logic) and smoothed by `fidelity` (100→50 closing applied after the offset, 50→0 Minkowski blend hull→design-area rectangle), always one ring, always containing the thread disc. Tested in `__tests__/base-outline.test.ts`
   - `cutter-geometry.ts` — cutter ring (base outline + clearance, one wall thick) and its Z range
+  - `draft-geometry.ts` — draft angle (dev-only `draftAngle` setting): relief built as a stack of 0.1 mm layers, each the design grown by the draft, so the face stays exact and walls flare toward the base. Tested in `__tests__/draft-geometry.test.ts`
+  - `project.ts` — `StampProject` save/load: `.stamp.json` files (settings, texts, image, uploaded fonts as base64) and the IndexedDB autosave that `page.tsx` restores on load. `parseProject()` fills in settings added since a file was saved — add new settings to `DEFAULT_STAMP_SETTINGS` and old files keep opening
   - `clay-geometry.ts` — builds clay impression preview (inverted stamp design, unmirrored)
   - `stl-export.ts` — binary STL writer + download helper
   - `font-manager.ts` — loads/caches bundled fonts, converts .ttf/.otf → typeface.js JSON via opentype.js

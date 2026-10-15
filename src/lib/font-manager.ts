@@ -102,11 +102,22 @@ export async function loadAllBundledFonts(): Promise<FontEntry[]> {
   });
 }
 
+/** Raw files of uploaded fonts, kept so a saved project can embed them. */
+const customFontFiles = new Map<string, ArrayBuffer>();
+
+export function getCustomFontFile(name: string): ArrayBuffer | undefined {
+  return customFontFiles.get(name);
+}
+
 export async function loadCustomFont(file: File): Promise<FontEntry> {
-  const buffer = await file.arrayBuffer();
+  return loadCustomFontBuffer(await file.arrayBuffer(), file.name.replace(/\.\w+$/, ""));
+}
+
+export function loadCustomFontBuffer(buffer: ArrayBuffer, fallbackName: string): FontEntry {
   const otFont = opentype.parse(buffer);
-  const name = otFont.getEnglishName("fontFamily") || file.name.replace(/\.\w+$/, "");
+  const name = otFont.getEnglishName("fontFamily") || fallbackName;
   parseFontBuffer(name, buffer, otFont);
+  customFontFiles.set(name, buffer);
   return { name, font: fontCache.get(name)! };
 }
 

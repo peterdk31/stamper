@@ -1,16 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { ColorMask } from "@/types/stamp";
+import type { ColorMask, ProjectImage } from "@/types/stamp";
 import ColorPickerModal from "./ColorPickerModal";
 import SliderInput from "./SliderInput";
 import { More } from "./ui";
 
 interface Props {
-  imageDataUrl: string | null;
-  svgText: string | null;
-  onImageChange: (dataUrl: string | null, fileName?: string) => void;
-  onSvgChange: (svgText: string | null) => void;
+  image: ProjectImage | null;
+  onImageChange: (image: ProjectImage | null) => void;
   isProcessing?: boolean;
   progress?: number;
   progressStage?: string;
@@ -73,8 +71,8 @@ function isColorMasked(r: number, g: number, b: number, masks: ColorMask[]): boo
 }
 
 export default function ImageUpload({
-  imageDataUrl, svgText,
-  onImageChange, onSvgChange,
+  image,
+  onImageChange,
   isProcessing, progress = 0, progressStage = "",
   threshold = 128, onThresholdChange,
   brightness = 0, onBrightnessChange,
@@ -88,7 +86,9 @@ export default function ImageUpload({
   const pixelCacheRef = useRef<ImageData | null>(null);
   const propsRef = useRef<LocalAdj>({ threshold, brightness, contrast, colorMasks, invert });
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const imageDataUrl = image?.kind === "raster" ? image.dataUrl : null;
+  const svgText = image?.kind === "svg" ? image.svgText : null;
+  const fileName = image?.fileName ?? null;
 
   useEffect(() => {
     propsRef.current = { threshold, brightness, contrast, colorMasks, invert };
@@ -163,26 +163,17 @@ export default function ImageUpload({
 
   const handleFile = useCallback(
     (file: File) => {
-      const baseName = file.name.replace(/\.[^.]+$/, "");
       if (file.type === "image/svg+xml" || file.name.endsWith(".svg")) {
         const reader = new FileReader();
-        reader.onload = () => {
-          onSvgChange(reader.result as string);
-          onImageChange(null);
-          setFileName(file.name);
-        };
+        reader.onload = () => onImageChange({ kind: "svg", svgText: reader.result as string, fileName: file.name });
         reader.readAsText(file);
       } else if (file.type.startsWith("image/")) {
         const reader = new FileReader();
-        reader.onload = () => {
-          onImageChange(reader.result as string, baseName);
-          onSvgChange(null);
-          setFileName(file.name);
-        };
+        reader.onload = () => onImageChange({ kind: "raster", dataUrl: reader.result as string, fileName: file.name });
         reader.readAsDataURL(file);
       }
     },
-    [onImageChange, onSvgChange],
+    [onImageChange],
   );
 
   const handleDrop = useCallback(
@@ -196,8 +187,6 @@ export default function ImageUpload({
 
   function handleClear() {
     onImageChange(null);
-    onSvgChange(null);
-    setFileName(null);
   }
 
   const hasContent = !!(imageDataUrl || svgText);
