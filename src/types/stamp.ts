@@ -67,7 +67,7 @@ export const DEFAULT_STAMP_SETTINGS: StampSettings = {
   width: 40,
   height: 40,
   baseThickness: 6.0,
-  impressionDepth: 4.0,
+  impressionDepth: 2.0,
   cornerRadius: 3,
   fitDimension: "width",
   margin: 3,
