@@ -124,13 +124,13 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
 
   const baseBottomDepth = baseThickness;
 
-  // Cutter mode: base outline follows the design. Computed unmirrored in plate
-  // coordinates, mirrored here like the design (x → physW − x).
+  // Cutter mode: base outline follows the design. Computed unmirrored in
+  // design-area coordinates, mirrored and placed here like the design.
   const outline = cutter ? computeBaseOutline({
-    shapes: shapeData, width, height, margin, fidelity: cutter.fidelity, sharpCorners: cutter.sharpCorners,
+    shapes: shapeData, width, height, offset: cutter.offset, fidelity: cutter.fidelity,
     threadDiameter: threadEnabled ? threadConfig.majorDiameter : null,
   }) : null;
-  const mirroredOutline = outline?.map(p => ({ x: physW - p.x, y: p.y })) ?? null;
+  const mirroredOutline = outline?.map(p => ({ x: margin + width - p.x, y: margin + p.y })) ?? null;
   const baseShape = () => mirroredOutline
     ? pointsToShape(mirroredOutline)
     : createRoundedRectShape(physW, physH, cornerRadius);
@@ -189,7 +189,7 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
   if (cutter) {
     const ringOutline = mirroredOutline
       ?? createRoundedRectShape(physW, physH, cornerRadius).getPoints().map(p => ({ x: p.x, y: p.y }));
-    const ring = cutterRing(ringOutline, cutter.clearance, cutter.wallThickness, cutter.sharpCorners);
+    const ring = cutterRing(ringOutline, cutter.clearance, cutter.wallThickness);
     if (ring) {
       const { bottom, top } = cutterZRange(baseThickness, cutter.gripHeight, cutter.clayThickness);
       const geo = new ExtrudeGeometry(pointsToShape(ring.outer, [ring.inner]), { depth: top - bottom, bevelEnabled: false });

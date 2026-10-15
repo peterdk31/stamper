@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
-import type { StampSettings } from "@/types/stamp";
+import { plateMargin, type StampSettings } from "@/types/stamp";
 
 // Preview-only annotation. Rendered as a sibling of the stamp group (never a
 // child), so STL export — which walks only the stamp group — can't pick it up.
@@ -22,7 +22,8 @@ function cm(mm: number) {
 }
 
 export default function DimensionOverlay({ settings, shapes }: Props) {
-  const { width, height, margin, baseThickness, impressionDepth } = settings;
+  const { width, height, baseThickness, impressionDepth } = settings;
+  const margin = plateMargin(settings);
   const physW = width + margin * 2;
   const physH = height + margin * 2;
   const z = baseThickness + impressionDepth;
@@ -69,10 +70,15 @@ export default function DimensionOverlay({ settings, shapes }: Props) {
             color={IMPRINT_COLOR} label={`imprint ${cm(bounds.y1 - bounds.y0)}`} primary />
         </>
       )}
-      <Dimension axis="x" from={0} to={physW} edge={0} at={-gap * 2} z={z}
-        color={PLATE_COLOR} label={`plate ${cm(physW)}`} />
-      <Dimension axis="y" from={0} to={physH} edge={0} at={-gap * 2} z={z}
-        color={PLATE_COLOR} label={`plate ${cm(physH)}`} />
+      {/* No rectangular plate in cutter mode: the base follows the design. */}
+      {!settings.cutterEnabled && (
+        <>
+          <Dimension axis="x" from={0} to={physW} edge={0} at={-gap * 2} z={z}
+            color={PLATE_COLOR} label={`plate ${cm(physW)}`} />
+          <Dimension axis="y" from={0} to={physH} edge={0} at={-gap * 2} z={z}
+            color={PLATE_COLOR} label={`plate ${cm(physH)}`} />
+        </>
+      )}
     </group>
   );
 }

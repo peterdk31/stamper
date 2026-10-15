@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
 import DimensionOverlay, { IMPRINT_COLOR, PLATE_COLOR, AREA_COLOR } from "./DimensionOverlay";
-import type { StampSettings, ThinFeatureMap, FeatureChanges } from "@/types/stamp";
+import { plateMargin, type StampSettings, type ThinFeatureMap, type FeatureChanges } from "@/types/stamp";
 import type { StampGeoMessage, SerializedMesh } from "@/lib/stamp-geometry.worker";
 
 function buildGroup(meshes: SerializedMesh[]): THREE.Group {
@@ -77,7 +77,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
       shapes: shapeData,
       width: settings.width,
       height: settings.height,
-      margin: settings.margin,
+      margin: plateMargin(settings),
       baseThickness: settings.baseThickness,
       impressionDepth: settings.impressionDepth,
       cornerRadius: settings.cornerRadius,
@@ -157,8 +157,10 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
   useEffect(() => {
     if (!cutterGroup) return;
     const gap = 15;
-    cutterGroup.position.set(0, cutterOnStamp ? 0 : -(settings.height + settings.margin * 2 + gap), 0);
-  }, [cutterGroup, cutterOnStamp, settings.height, settings.margin]);
+    const { offset, clearance, wallThickness } = settings.cutterConfig;
+    const reach = offset + clearance + wallThickness; // ring beyond the design area, per side
+    cutterGroup.position.set(0, cutterOnStamp ? 0 : -(settings.height + reach * 2 + gap), 0);
+  }, [cutterGroup, cutterOnStamp, settings.height, settings.cutterConfig]);
 
   const center = useMemo(() => {
     return new THREE.Vector3(
@@ -210,7 +212,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap }: Props) {
           {showDimensions && (
             <ul className="mt-1 space-y-0.5 text-gray-300">
               <LegendItem color={IMPRINT_COLOR}>imprint in clay</LegendItem>
-              <LegendItem color={PLATE_COLOR}>plate (design area + 2 × margin)</LegendItem>
+              {!settings.cutterEnabled && <LegendItem color={PLATE_COLOR}>plate (design area + 2 × margin)</LegendItem>}
               <LegendItem color={AREA_COLOR} dashed>design area (Width × Height)</LegendItem>
             </ul>
           )}

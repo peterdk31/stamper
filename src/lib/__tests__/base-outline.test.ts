@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeBaseOutline, type BaseOutlineInput } from "../base-outline";
 import { cutterRing, cutterZRange } from "../cutter-geometry";
-import { findCorners } from "../sharp-corners";
 
 type Point = { x: number; y: number };
 
@@ -36,7 +35,7 @@ const U = pts([[0, 0], [30, 0], [30, 30], [22, 30], [22, 8], [8, 8], [8, 30], [0
 
 const input = (over: Partial<BaseOutlineInput>): BaseOutlineInput => ({
   shapes: [{ outer: U, holes: [] }],
-  width: 30, height: 30, margin: 3, fidelity: 100, sharpCorners: false, threadDiameter: null,
+  width: 30, height: 30, offset: 3, fidelity: 100, threadDiameter: null,
   ...over,
 });
 
@@ -45,58 +44,38 @@ describe("computeBaseOutline", () => {
     expect(computeBaseOutline(input({ shapes: [] }))).toBeNull();
   });
 
-  it("follows the design at fidelity 100, grown by the margin", () => {
+  it("follows the design at fidelity 100, grown by the offset", () => {
     const outline = computeBaseOutline(input({ fidelity: 100 }))!;
     // The notch stays open: its centre is outside the base.
     expect(inside({ x: 18, y: 25 }, outline)).toBe(false);
-    // Outline area ≈ U grown by 3 mm with round corners.
-    const uArea = area(U);
-    expect(area(outline)).toBeGreaterThan(uArea);
+    // The U grown by 3 mm with sharp corners: the outer corner reaches (−3, −3).
+    expect(inside({ x: -2.9, y: -2.9 }, outline)).toBe(true);
+    expect(area(outline)).toBeGreaterThan(area(U));
     expect(area(outline)).toBeLessThan(36 * 36);
   });
 
-  it("is today's rounded-rect plate at fidelity 0", () => {
+  it("is the bare design at offset 0", () => {
+    const outline = computeBaseOutline(input({ offset: 0, fidelity: 100 }))!;
+    expect(area(outline)).toBeCloseTo(area(U), 1);
+  });
+
+  it("is the design area grown by the offset, square-cornered, at fidelity 0", () => {
     const outline = computeBaseOutline(input({ fidelity: 0 }))!;
     const b = bbox(outline);
-    expect(b.x0).toBeCloseTo(0, 1);
-    expect(b.y0).toBeCloseTo(0, 1);
-    expect(b.x1).toBeCloseTo(36, 1);
-    expect(b.y1).toBeCloseTo(36, 1);
-    // Corners rounded by the margin: 36² − (4 − π)·3², less the arcs' chord sag
-    expect(Math.abs(area(outline) - (36 * 36 - (4 - Math.PI) * 9))).toBeLessThan(2);
+    expect(b.x0).toBeCloseTo(-3, 1);
+    expect(b.y0).toBeCloseTo(-3, 1);
+    expect(b.x1).toBeCloseTo(33, 1);
+    expect(b.y1).toBeCloseTo(33, 1);
+    expect(area(outline)).toBeCloseTo(36 * 36, 0);
   });
 
-  it("keeps the design's sharp corners with sharpCorners", () => {
-    const round = computeBaseOutline(input({ fidelity: 100 }))!;
-    const sharp = computeBaseOutline(input({ fidelity: 100, sharpCorners: true }))!;
-    // The U's outer corner grown by 3 mm: mitered it reaches (−3, −3), rounded it doesn't.
-    expect(inside({ x: -2.8, y: -2.8 }, sharp.map(p => ({ x: p.x - 3, y: p.y - 3 })))).toBe(true);
-    expect(inside({ x: -2.8, y: -2.8 }, round.map(p => ({ x: p.x - 3, y: p.y - 3 })))).toBe(false);
-    // Fidelity 0 becomes a square-cornered plate.
-    const plate = computeBaseOutline(input({ fidelity: 0, sharpCorners: true }))!;
-    expect(area(plate)).toBeCloseTo(36 * 36, 0);
-  });
-
-  it("doesn't turn tracing noise into spikes with sharpCorners", () => {
-    // A 10 mm circle with ±0.05 mm zigzag: no real corners, so sharp = round.
-    const noisy = Array.from({ length: 400 }, (_, i) => {
-      const a = (i / 400) * Math.PI * 2, r = 10 + (i % 2 ? 0.05 : -0.05);
-      return { x: 15 + r * Math.cos(a), y: 15 + r * Math.sin(a) };
-    });
-    expect(findCorners(noisy)).toHaveLength(0);
-    const shapes = [{ outer: noisy, holes: [] }];
-    const round = computeBaseOutline(input({ shapes, fidelity: 100 }))!;
-    const sharp = computeBaseOutline(input({ shapes, fidelity: 100, sharpCorners: true }))!;
-    expect(Math.abs(area(sharp) - area(round))).toBeLessThan(1);
-  });
-
-  it("keeps a thin tip pointed but caps its length", () => {
+  it("squares off a thin tip instead of growing a long spike", () => {
     // 20° spike pointing right, tip at x = 30. A full miter would reach 3 / sin(10°) ≈ 17 mm past it.
     const spike = pts([[0, 10], [30, 15], [0, 20]]);
-    const outline = computeBaseOutline(input({ shapes: [{ outer: spike, holes: [] }], fidelity: 100, sharpCorners: true }))!;
-    const reach = bbox(outline).x1 - (30 + 3); // plate coordinates: + margin
-    expect(reach).toBeGreaterThan(3 * 1.5); // well past the round offset (3 mm)
-    expect(reach).toBeLessThanOrEqual(3 * 3 + 0.01); // capped at 3 × margin
+    const outline = computeBaseOutline(input({ shapes: [{ outer: spike, holes: [] }], fidelity: 100 }))!;
+    const reach = bbox(outline).x1 - 30;
+    expect(reach).toBeGreaterThan(2.9);
+    expect(reach).toBeLessThan(4);
   });
 
   it("never shrinks as fidelity drops", () => {
@@ -108,7 +87,7 @@ describe("computeBaseOutline", () => {
 
   it("bridges islands into one ring", () => {
     const shapes = [{ outer: rect(0, 0, 10, 10), holes: [] }, { outer: rect(20, 0, 30, 10), holes: [] }];
-    const outline = computeBaseOutline(input({ shapes, width: 30, height: 10, margin: 0, fidelity: 100 }))!;
+    const outline = computeBaseOutline(input({ shapes, width: 30, height: 10, offset: 0, fidelity: 100 }))!;
     expect(inside({ x: 5, y: 5 }, outline)).toBe(true);
     expect(inside({ x: 25, y: 5 }, outline)).toBe(true);
     expect(inside({ x: 15, y: 5 }, outline)).toBe(true);
@@ -123,8 +102,8 @@ describe("computeBaseOutline", () => {
   it("keeps the thread disc inside the base for a thin design", () => {
     // A 2 mm bar along the top of a 30 × 30 area: the plate centre is far outside it.
     const shapes = [{ outer: rect(0, 26, 30, 28), holes: [] }];
-    const outline = computeBaseOutline(input({ shapes, margin: 1, fidelity: 100, threadDiameter: 10 }))!;
-    const cx = 15 + 1, cy = 15 + 1; // plate coordinates
+    const outline = computeBaseOutline(input({ shapes, offset: 1, fidelity: 100, threadDiameter: 10 }))!;
+    const cx = 15, cy = 15;
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
       expect(inside({ x: cx + 6.9 * Math.cos(a), y: cy + 6.9 * Math.sin(a) }, outline)).toBe(true);
@@ -142,8 +121,8 @@ describe("cutterRing", () => {
     expect(outer.y1).toBeCloseTo(11.5, 2);
   });
 
-  it("keeps sharp ring corners with sharpCorners", () => {
-    const ring = cutterRing(rect(0, 0, 20, 10), 0.3, 1.2, true)!;
+  it("keeps the base's sharp corners", () => {
+    const ring = cutterRing(rect(0, 0, 20, 10), 0.3, 1.2)!;
     expect(area(ring.outer)).toBeCloseTo(23 * 13, 1);
   });
 

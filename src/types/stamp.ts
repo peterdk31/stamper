@@ -18,7 +18,7 @@ export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
 // When enabled, the base outline follows the design (see base-outline.ts).
 export interface CutterConfig {
   fidelity: number;      // 0–100 — how closely the base outline follows the design (0 = rectangle)
-  sharpCorners: boolean; // keep the design's sharp corners instead of rounding them by the margin
+  offset: number;        // mm — base outline (and the ring with it) grown this far beyond the design, corners kept sharp
   invertInside: boolean; // invert the image within its silhouette (relief ↔ channels), background stays empty
   clayThickness: number; // mm — the cutting edge reaches this far below the stamp face
   wallThickness: number; // mm — ring wall
@@ -28,7 +28,7 @@ export interface CutterConfig {
 
 export const DEFAULT_CUTTER_CONFIG: CutterConfig = {
   fidelity: 75,
-  sharpCorners: false,
+  offset: 3,
   invertInside: false,
   clayThickness: 6,
   wallThickness: 1.2,
@@ -47,7 +47,7 @@ export interface StampSettings {
   impressionDepth: number; // mm — how deep/tall the design features are
   cornerRadius: number; // mm — rounded rectangle corners
   fitDimension: FitDimension;
-  margin: number; // mm — extra base material around the design
+  margin: number; // mm — extra base material around the design (ignored in cutter mode, see plateMargin)
   simplification: number; // 0–1, controls raster trace detail
   threshold: number; // 0–255, luminance cutoff for black/white conversion
   brightness: number; // -100..100, applied before threshold
@@ -124,4 +124,9 @@ export interface DesignData {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   sourceAspectRatio: number | null;
   thinFeatureMap?: ThinFeatureMap;
+}
+
+/** Margin around the design area. 0 in cutter mode: the base follows the design and `cutterConfig.offset` grows it instead. */
+export function plateMargin(settings: Pick<StampSettings, "margin" | "cutterEnabled">): number {
+  return settings.cutterEnabled ? 0 : settings.margin;
 }

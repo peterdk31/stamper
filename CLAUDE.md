@@ -69,7 +69,7 @@ Sources (parallel):                Processing (sequential):           Output:
   - `design-data.ts` — `rasterToDesignData()`, `designDataToShapes()` (untangles shapes whose rings cross with a Clipper even-odd union — never drop a ring, a dropped hole prints filled), contour nesting
   - `stamp-geometry.worker.ts` — builds the stamp meshes (rounded-rect base, design extrusion, female thread) off the main thread. Contains `mirrorShapes()`; imports the female thread from `thread-geometry.ts`.
   - `stamp-geometry.ts` — `createRoundedRectShape()`, shared with `clay-geometry.ts`
-  - `base-outline.ts` — cutter mode: stamp base outline = design silhouette smoothed by `fidelity` (100→50 closing applied after the margin offset, 50→0 Minkowski blend hull→design-area rectangle), always one ring, always containing the thread disc. Tested in `__tests__/base-outline.test.ts`
+  - `base-outline.ts` — cutter mode: stamp base outline = design silhouette grown by `cutterConfig.offset` (miter joins, so corners stay sharp — there is no separate corner logic) and smoothed by `fidelity` (100→50 closing applied after the offset, 50→0 Minkowski blend hull→design-area rectangle), always one ring, always containing the thread disc. Tested in `__tests__/base-outline.test.ts`
   - `cutter-geometry.ts` — cutter ring (base outline + clearance, one wall thick) and its Z range
   - `clay-geometry.ts` — builds clay impression preview (inverted stamp design, unmirrored)
   - `stl-export.ts` — binary STL writer + download helper
@@ -96,6 +96,6 @@ Sources (parallel):                Processing (sequential):           Output:
 - **Mirroring happens once, in `stamp-geometry.worker.ts`.** Source shapes are always stored unmirrored. The stamp preview shows the mirrored version; the clay impression preview uses the original unmirrored shapes.
 - **Nozzle presets** overwrite `impressionDepth` and `baseThickness` when switched.
 - **Stamp orientation** — impression face on +Z, prints face-up without supports.
-- **Clay cutter is a separate tool, never fused to the stamp** — clay gets trapped between a fused cutting wall and the relief. Opt-in via `cutterEnabled`; when off, the stamp is unchanged (rounded-rect base). The ring is straight-walled and nothing on it is narrower than the base, so stamp and cutter slide past each other in either order. Cutting edge reaches `clayThickness` below the stamp face; exports cutting-edge up.
+- **Clay cutter is a separate tool, never fused to the stamp** — clay gets trapped between a fused cutting wall and the relief. Opt-in via `cutterEnabled`; when off, the stamp is unchanged (rounded-rect base). In cutter mode the margin is 0 (`plateMargin()`), replaced by the cutter offset. The ring is straight-walled and nothing on it is narrower than the base, so stamp and cutter slide past each other in either order. Cutting edge reaches `clayThickness` below the stamp face; exports cutting-edge up.
 - **Thread config** — all dimensions in `ThreadConfig` (single object in `stamp.ts`). Tolerance (default 0.5mm) shrinks the male thread. Designed for easy iteration after test prints.
 - **Font conversion** — `font-manager.ts` converts opentype.js glyph paths to typeface.js JSON format (m/l/q/b path commands). The `loader.parse()` call uses an `any` cast because the generated JSON doesn't match Three.js's strict `FontData` type.

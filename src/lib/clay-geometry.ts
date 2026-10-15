@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { StampSettings } from "@/types/stamp";
+import { plateMargin, type StampSettings } from "@/types/stamp";
 import { createRoundedRectShape } from "./stamp-geometry";
 const CLAY_DEPTH = 5;
 
@@ -8,7 +8,8 @@ export function buildClayImpressionGeometry(
   shapes: THREE.Shape[],
 ): THREE.Group {
   const group = new THREE.Group();
-  const margin = settings.margin;
+  // In cutter mode the tile is cut `offset` beyond the design.
+  const margin = settings.cutterEnabled ? settings.cutterConfig.offset : plateMargin(settings);
   const physW = settings.width + margin * 2;
   const physH = settings.height + margin * 2;
 

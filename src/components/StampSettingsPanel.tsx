@@ -76,10 +76,12 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
         <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
           onChange={(v) => update({ height: v })}
           disabled={settings.fitDimension === "width"} />
-        <p className="text-xs text-gray-500">
-          Plate: {((settings.width + settings.margin * 2) / 10).toFixed(1)} × {((settings.height + settings.margin * 2) / 10).toFixed(1)} cm
-          {" "}(design area + 2 × {settings.margin} mm margin)
-        </p>
+        {!settings.cutterEnabled && (
+          <p className="text-xs text-gray-500">
+            Plate: {((settings.width + settings.margin * 2) / 10).toFixed(1)} × {((settings.height + settings.margin * 2) / 10).toFixed(1)} cm
+            {" "}(design area + 2 × {settings.margin} mm margin)
+          </p>
+        )}
       </fieldset>
 
       <fieldset className="space-y-3 border-t pt-3">
@@ -109,17 +111,15 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
               </span>}
               onChange={(v) => updateCutter({ fidelity: v })} />
             <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={cutter.sharpCorners}
-                onChange={(e) => updateCutter({ sharpCorners: e.target.checked })} />
-              Sharp corners
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={cutter.invertInside}
                 onChange={(e) => updateCutter({ invertInside: e.target.checked })} />
               Invert inside outline
             </label>
-            <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
-              onChange={(v) => update({ margin: v })} />
+            <SliderInput label="Offset" unit="mm" value={cutter.offset} min={0} max={20} step={0.5}
+              onChange={(v) => updateCutter({ offset: v })} />
+            <p className="text-xs text-gray-500">
+              How far the base and the cut edge reach beyond the design. Corners stay sharp; lower the fidelity to smooth them.
+            </p>
             <SliderInput label="Clay thickness" unit="mm" value={cutter.clayThickness} min={2} max={20} step={0.5}
               onChange={(v) => updateCutter({ clayThickness: v })} />
             {reliefTooDeep ? (
@@ -185,8 +185,10 @@ export default function StampSettingsPanel({ settings, onChange, thickenEnabled,
               <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Shape</legend>
               <SliderInput label="Impression Depth" unit="mm" value={settings.impressionDepth} min={0.2} max={10} step={0.1}
                 onChange={(v) => update({ impressionDepth: v })} />
-              <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
-                onChange={(v) => update({ margin: v })} />
+              {!settings.cutterEnabled && (
+                <SliderInput label="Margin" unit="mm" value={settings.margin} min={0} max={20} step={0.5}
+                  onChange={(v) => update({ margin: v })} />
+              )}
               {!settings.cutterEnabled && (
                 <SliderInput label="Corner Radius" unit="mm" value={settings.cornerRadius}
                   min={0} max={(Math.min(settings.width, settings.height) + settings.margin * 2) / 2} step={0.5}

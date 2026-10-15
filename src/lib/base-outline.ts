@@ -3,21 +3,21 @@ import {
   CLIPPER_SCALE, MIN_AREA_SQ, clipperBoolOp, clipperOffset, fromClipperPath, toClipperPath, type Point,
 } from "./clipper-thicken";
 import { simplifyShape } from "./simplify";
-import { sharpenCorners } from "./sharp-corners";
 
 /**
- * Stamp base outline for cutter mode: the design's silhouette, smoothed by
- * `fidelity`, grown by the margin. Always a single ring without holes, so the
- * cutter (a straight ring around it) can slide over the stamp from either side.
+ * Stamp base outline for cutter mode: the design's silhouette, grown by
+ * `offset` and smoothed by `fidelity`. Always a single ring without holes, so
+ * the cutter (a straight ring around it) can slide over the stamp from either
+ * side.
  *
+ * The offset uses miter joins, so the design's corners stay sharp; only
+ * fidelity smooths the outline.
  * fidelity 100 → 50: morphological closing (grow by r, shrink by r) with a
- *   growing r, filling concavities; at 50 it is the convex hull.
+ *   growing r, filling concavities; at 50 it is the convex hull. Closing
+ *   never rounds convex corners.
  * fidelity 50 → 0: Minkowski blend of the convex hull and the design-area
- *   rectangle; at 0 the outline is today's rectangular plate (corners rounded
- *   by the margin).
+ *   rectangle; at 0 the outline is the design-area rectangle grown by the offset.
  * Islands are always bridged, using the smallest closing radius that joins them.
- * With `sharpCorners`, the design's real corners get pointed wedges on top of
- * the round margin (see sharp-corners.ts) instead of being rounded by it.
  */
 
 export interface BaseOutlineInput {
@@ -26,10 +26,9 @@ export interface BaseOutlineInput {
   /** Design area (Width × Height sliders). */
   width: number;
   height: number;
-  margin: number;
+  /** How far the base reaches beyond the design, mm. */
+  offset: number;
   fidelity: number;
-  /** Keep the design's real corners pointed instead of rounding them by the margin. */
-  sharpCorners: boolean;
   /** Major diameter of the handle thread, or null without a handle mount. */
   threadDiameter: number | null;
 }
@@ -40,6 +39,19 @@ const SIMPLIFY_TOLERANCE = 0.05;
 const DISC_SEGMENTS = 64;
 
 type Paths = ClipperLib.Paths;
+
+/** Miter length cap (× offset): tips sharper than ~29° are squared off about one offset out instead of growing into long spikes. */
+const MITER_LIMIT = 4;
+
+/** Outward offset by `mm` with miter joins: straight edges move out parallel, corners stay sharp. */
+export function miterOffset(paths: Paths, mm: number): Paths {
+  if (mm <= 0) return paths;
+  const co = new ClipperLib.ClipperOffset(MITER_LIMIT);
+  for (const p of paths) co.AddPath(p, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+  const result: Paths = [];
+  co.Execute(result, mm * CLIPPER_SCALE);
+  return outersOnly(result);
+}
 
 /** Round-join offset by `mm` (negative shrinks), outer rings only. */
 function offset(paths: Paths, mm: number): Paths {
@@ -154,27 +166,22 @@ export function closingRadius(fidelity: number, mergeRadius: number, size: numbe
 }
 
 /**
- * Smoothed silhouette grown by the margin. The closing runs after the margin
- * offset: a closing narrower than the margin done before it would vanish (the
+ * Silhouette grown by the offset, then smoothed. The closing runs after the
+ * offset: a closing narrower than the offset done before it would vanish (the
  * offset re-sharpens filled concave corners). Hull and rectangle blend commute
- * with the offset, so they can be blended first and grown after. Sharp corners
- * are added last, from the corners of the shape that was grown.
+ * with the offset, so they can be blended first and grown after.
  */
 function smoothAndGrow(sil: Paths, input: BaseOutlineInput): Paths {
   const f = Math.min(100, Math.max(0, input.fidelity));
-  const grow = (p: Paths) => input.margin > 0 ? offset(p, input.margin) : p;
-  const sharpen = (grown: Paths, source: Paths) =>
-    input.sharpCorners ? sharpenCorners(grown, source, input.margin) : grown;
 
   if (f <= 50) {
-    const blend = [blendHullToRect(hullPoints(sil), input.width, input.height, f / 50)];
-    return sharpen(grow(blend), blend);
+    return miterOffset([blendHullToRect(hullPoints(sil), input.width, input.height, f / 50)], input.offset);
   }
-  const grown = grow(sil);
+  const grown = miterOffset(sil, input.offset);
   const merged = mergeIslands(grown);
-  if (f >= 100) return sharpen(merged.paths, sil);
-  const size = Math.max(input.width, input.height) + 2 * input.margin;
-  return sharpen(mergeIslands(closing(grown, closingRadius(f, merged.radius, size))).paths, sil);
+  if (f >= 100) return merged.paths;
+  const size = Math.max(input.width, input.height) + 2 * input.offset;
+  return mergeIslands(closing(grown, closingRadius(f, merged.radius, size))).paths;
 }
 
 function disc(cx: number, cy: number, r: number): ClipperLib.Path {
@@ -187,8 +194,8 @@ function disc(cx: number, cy: number, r: number): ClipperLib.Path {
 }
 
 /**
- * Returns the base outline in plate coordinates (design offset by the margin),
- * unmirrored, or null when there is no design (callers fall back to the
+ * Returns the base outline in design-area coordinates (it reaches `offset`
+ * beyond the design, so it can go negative), unmirrored, or null when there is no design (callers fall back to the
  * rounded-rect plate).
  */
 export function computeBaseOutline(input: BaseOutlineInput): Point[] | null {
@@ -204,6 +211,5 @@ export function computeBaseOutline(input: BaseOutlineInput): Point[] | null {
   if (!outer) return null;
 
   const ring = fromClipperPath(outer);
-  return (simplifyShape(ring, [], SIMPLIFY_TOLERANCE)?.outer ?? ring)
-    .map((p) => ({ x: p.x + input.margin, y: p.y + input.margin }));
+  return simplifyShape(ring, [], SIMPLIFY_TOLERANCE)?.outer ?? ring;
 }
