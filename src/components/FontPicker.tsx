@@ -94,23 +94,23 @@ export default function FontPicker({ value, fonts, sample, onChange, onUpload }:
         onKeyDown={onKeyDown}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="w-full flex items-center justify-between gap-1 rounded border border-gray-300 shadow-sm bg-white text-sm px-2 py-1 text-left"
+        className="w-full flex items-center justify-between gap-1 rounded border border-stone-300 shadow-sm bg-white text-sm px-2 py-1 text-left"
       >
         <span className="truncate" style={{ fontFamily: `${previewFontFamily(value)}, sans-serif` }}>
           {value}
         </span>
-        <span className="text-gray-400 text-xs">▾</span>
+        <span className="text-stone-400 text-xs">▾</span>
       </button>
 
       {open && (
         <ul
           ref={listRef}
           role="listbox"
-          className="absolute z-20 mt-1 w-64 max-h-80 overflow-y-auto rounded border border-gray-300 bg-white shadow-lg py-1"
+          className="absolute z-20 mt-1 w-64 max-h-80 overflow-y-auto rounded border border-stone-300 bg-white shadow-lg py-1"
         >
           {groups.map((group) => (
             <li key={group.category} role="presentation">
-              <div className="px-2 pt-2 pb-0.5 text-[10px] uppercase tracking-wide text-gray-400">
+              <div className="px-2 pt-2 pb-0.5 text-[10px] uppercase tracking-wide text-stone-400">
                 {group.category}
               </div>
               <ul role="group">
@@ -124,7 +124,7 @@ export default function FontPicker({ value, fonts, sample, onChange, onUpload }:
                       data-index={index}
                       onPointerEnter={() => setHighlighted(index)}
                       onClick={() => select(font)}
-                      className={`px-2 py-1 cursor-pointer ${index === highlighted ? "bg-gray-100" : ""} ${font === value ? "font-semibold" : ""}`}
+                      className={`px-2 py-1 cursor-pointer ${index === highlighted ? "bg-stone-100" : ""} ${font === value ? "font-semibold" : ""}`}
                     >
                       <div
                         className="text-lg leading-tight truncate"
@@ -132,7 +132,7 @@ export default function FontPicker({ value, fonts, sample, onChange, onUpload }:
                       >
                         {sampleLine || font}
                       </div>
-                      {sampleLine && <div className="text-[10px] text-gray-500">{font}</div>}
+                      {sampleLine && <div className="text-[10px] text-stone-500">{font}</div>}
                     </li>
                   );
                 })}
@@ -140,11 +140,11 @@ export default function FontPicker({ value, fonts, sample, onChange, onUpload }:
             </li>
           ))}
           {onUpload && (
-            <li role="presentation" className="border-t border-gray-200 mt-1 pt-1">
+            <li role="presentation" className="border-t border-stone-200 mt-1 pt-1">
               <button
                 type="button"
                 onClick={() => { setOpen(false); onUpload(); }}
-                className="w-full px-2 py-1.5 text-left text-sm text-amber-700 hover:bg-gray-100"
+                className="w-full px-2 py-1.5 text-left text-sm text-accent-700 hover:bg-stone-100"
               >
                 Upload font (.ttf, .otf)…
               </button>

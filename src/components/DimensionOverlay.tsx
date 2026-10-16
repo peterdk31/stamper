@@ -13,12 +13,12 @@ interface Props {
   shapes: THREE.Shape[];
 }
 
-export const IMPRINT_COLOR = "#fbbf24";
-export const PLATE_COLOR = "#9ca3af";
-export const AREA_COLOR = "#60a5fa";
+export const IMPRINT_COLOR = "#275a54";
+export const PLATE_COLOR = "#78716c";
+export const AREA_COLOR = "#a8a29e";
 
-function cm(mm: number) {
-  return `${(mm / 10).toFixed(1)} cm`;
+function mm(v: number) {
+  return `${Number(v.toFixed(1))} mm`;
 }
 
 export default function DimensionOverlay({ settings, shapes }: Props) {
@@ -65,18 +65,18 @@ export default function DimensionOverlay({ settings, shapes }: Props) {
       {bounds && (
         <>
           <Dimension axis="x" from={bounds.x0} to={bounds.x1} edge={bounds.y0} at={-gap} z={z}
-            color={IMPRINT_COLOR} label={`imprint ${cm(bounds.x1 - bounds.x0)}`} primary />
+            color={IMPRINT_COLOR} label={`imprint ${mm(bounds.x1 - bounds.x0)}`} primary />
           <Dimension axis="y" from={bounds.y0} to={bounds.y1} edge={bounds.x0} at={-gap} z={z}
-            color={IMPRINT_COLOR} label={`imprint ${cm(bounds.y1 - bounds.y0)}`} primary />
+            color={IMPRINT_COLOR} label={`imprint ${mm(bounds.y1 - bounds.y0)}`} primary />
         </>
       )}
       {/* No rectangular plate in cutter mode: the base follows the design. */}
       {!settings.cutterEnabled && (
         <>
           <Dimension axis="x" from={0} to={physW} edge={0} at={-gap * 2} z={z}
-            color={PLATE_COLOR} label={`plate ${cm(physW)}`} />
+            color={PLATE_COLOR} label={`plate ${mm(physW)}`} />
           <Dimension axis="y" from={0} to={physH} edge={0} at={-gap * 2} z={z}
-            color={PLATE_COLOR} label={`plate ${cm(physH)}`} />
+            color={PLATE_COLOR} label={`plate ${mm(physH)}`} />
         </>
       )}
     </group>
@@ -122,7 +122,7 @@ function Dimension({ axis, from, to, edge, at, z, color, label, primary }: Dimen
       <Line points={points} segments color={color} lineWidth={primary ? 1.5 : 1} />
       <Html position={p((from + to) / 2, at)} center zIndexRange={[10, 0]} pointerEvents="none">
         <span
-          className={`whitespace-nowrap rounded bg-gray-900/90 px-1 font-mono ${primary ? "text-sm font-semibold" : "text-xs"}`}
+          className={`whitespace-nowrap rounded bg-white/90 px-1 font-mono ${primary ? "text-sm font-semibold" : "text-xs"}`}
           style={{ color }}
         >
           {label}

@@ -70,7 +70,7 @@ export default function TextEditor({
       />
 
       {texts.map((text, i) => (
-        <div key={i} className="space-y-2 rounded border border-gray-200 p-2.5">
+        <div key={i} className="space-y-2 rounded border border-stone-200 p-2.5">
           <div className="flex items-start gap-2">
             <textarea
               value={text.content}
@@ -78,14 +78,14 @@ export default function TextEditor({
               aria-label={`Text ${i + 1}`}
               rows={Math.max(1, text.content.split("\n").length)}
               onChange={(e) => updateText(i, { content: e.target.value })}
-              className="flex-1 rounded border border-gray-300 text-sm px-2 py-1.5 resize-y"
+              className="flex-1 rounded border border-stone-300 text-sm px-2 py-1.5 resize-y"
             />
             <button
               type="button"
               onClick={() => removeText(i)}
               aria-label={`Remove text ${i + 1}`}
               title="Remove text"
-              className="px-1.5 py-1 text-gray-400 hover:text-red-600"
+              className="px-1.5 py-1 text-stone-400 hover:text-red-600"
             >
               ✕
             </button>
@@ -107,12 +107,12 @@ export default function TextEditor({
               onChange={(v) => updateText(i, { letterSpacing: v })} />
             {hasImage && (
               <div className="flex items-center justify-between gap-2">
-                <label htmlFor={`text-pos-${i}`} className="text-sm font-medium text-gray-700">Position</label>
+                <label htmlFor={`text-pos-${i}`} className="text-sm font-medium text-stone-700">Position</label>
                 <select
                   id={`text-pos-${i}`}
                   value={text.align}
                   onChange={(e) => updateText(i, { align: e.target.value as TextAlign })}
-                  className="rounded border border-gray-300 text-sm px-2 py-1"
+                  className="rounded border border-stone-300 text-sm px-2 py-1"
                 >
                   <option value="top">Above image</option>
                   <option value="bottom">Below image</option>
@@ -128,7 +128,7 @@ export default function TextEditor({
       <button
         type="button"
         onClick={addText}
-        className="w-full rounded border border-dashed border-gray-300 py-1.5 text-sm text-gray-600 hover:border-amber-500 hover:text-amber-800"
+        className="w-full rounded border border-dashed border-stone-300 py-1.5 text-sm text-stone-600 hover:border-accent-500 hover:text-accent-800"
       >
         + Add text
       </button>

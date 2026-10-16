@@ -30,6 +30,7 @@ export function parseProject(json: unknown): StampProject {
   }
   return {
     version: PROJECT_VERSION,
+    name: typeof p.name === "string" ? p.name : "",
     settings: withDefaults(p.settings ?? {}),
     image: p.image ?? null,
     texts: Array.isArray(p.texts) ? p.texts : [],

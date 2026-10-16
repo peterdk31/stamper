@@ -9,7 +9,7 @@ export function ChoiceButtons({ label, value, options, onChange }: {
 }) {
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      <span className="text-xs text-gray-500 mr-1">{label}</span>
+      <span className="text-xs text-stone-500 mr-1">{label}</span>
       {options.map((o) => (
         <button
           key={o.id}
@@ -18,7 +18,7 @@ export function ChoiceButtons({ label, value, options, onChange }: {
           title={o.title}
           aria-pressed={value === o.id}
           className={`px-2 py-0.5 rounded text-xs font-medium ${
-            value === o.id ? "bg-amber-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            value === o.id ? "bg-accent-700 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200"
           }`}
         >
           {o.label}

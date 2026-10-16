@@ -1,37 +1,50 @@
-import * as THREE from "three";
-import { plateMargin, type StampSettings } from "@/types/stamp";
-import { createRoundedRectShape } from "./stamp-geometry";
-const CLAY_DEPTH = 5;
+import ClipperLib from "clipper-lib";
+import { MIN_AREA_SQ, fromClipperPath, toClipperPath, type Point } from "./clipper-thicken";
 
-export function buildClayImpressionGeometry(
-  settings: StampSettings,
-  shapes: THREE.Shape[],
-): THREE.Group {
-  const group = new THREE.Group();
-  // In cutter mode the tile is cut `offset` beyond the design.
-  const margin = settings.cutterEnabled ? settings.cutterConfig.offset : plateMargin(settings);
-  const physW = settings.width + margin * 2;
-  const physH = settings.height + margin * 2;
+/**
+ * Clay impression preview: what the pressed tile looks like. The tile is a
+ * solid slab whose top `impressionDepth` is the tile outline minus the design,
+ * so the design shows as pockets. Built from the *unmirrored* shapes — the
+ * clay reads the right way round, the stamp is its mirror image.
+ */
 
-  const clayShape = createRoundedRectShape(physW, physH, settings.cornerRadius);
-  const clayGeo = new THREE.ExtrudeGeometry(clayShape, {
-    depth: CLAY_DEPTH,
-    bevelEnabled: false,
-  });
-  const clayMat = new THREE.MeshStandardMaterial({ color: 0xc4a882, roughness: 0.9 });
-  const clayMesh = new THREE.Mesh(clayGeo, clayMat);
-  group.add(clayMesh);
+export interface ClayShape { outer: Point[]; holes: Point[][] }
 
-  if (shapes.length === 0) return group;
+/**
+ * Tile outline minus the design: the top layer of the clay, as outers with
+ * holes. Design shapes may overlap each other (text over an image); they are
+ * unioned first, and their own holes (the inside of an "O") stay as clay.
+ */
+export function clayTopShapes(tile: Point[], design: { outer: Point[]; holes: Point[][] }[]): ClayShape[] {
+  const oriented = (ring: Point[], ccw: boolean) => {
+    const path = toClipperPath(ring);
+    if ((ClipperLib.Clipper.Area(path) > 0) !== ccw) path.reverse();
+    return path;
+  };
+  const c = new ClipperLib.Clipper();
+  c.AddPath(oriented(tile, true), ClipperLib.PolyType.ptSubject, true);
+  for (const s of design) {
+    if (s.outer.length < 3) continue;
+    // Outers CCW and holes CW, so non-zero fill unions overlapping shapes without losing their holes
+    c.AddPath(oriented(s.outer, true), ClipperLib.PolyType.ptClip, true);
+    for (const h of s.holes) if (h.length >= 3) c.AddPath(oriented(h, false), ClipperLib.PolyType.ptClip, true);
+  }
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctDifference, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
 
-  const impressionGeo = new THREE.ExtrudeGeometry(shapes, {
-    depth: settings.impressionDepth,
-    bevelEnabled: false,
-  });
-  const impressionMat = new THREE.MeshStandardMaterial({ color: 0x9c8060, roughness: 0.95 });
-  const impressionMesh = new THREE.Mesh(impressionGeo, impressionMat);
-  impressionMesh.position.set(margin, margin, CLAY_DEPTH - settings.impressionDepth);
-  group.add(impressionMesh);
-
-  return group;
+  const out: ClayShape[] = [];
+  const walk = (node: ClipperLib.PolyNode) => {
+    for (const outerNode of node.Childs()) {
+      const holes: Point[][] = [];
+      for (const holeNode of outerNode.Childs()) {
+        if (Math.abs(ClipperLib.Clipper.Area(holeNode.Contour())) >= MIN_AREA_SQ) holes.push(fromClipperPath(holeNode.Contour()));
+        walk(holeNode); // clay islands inside a pocket
+      }
+      if (Math.abs(ClipperLib.Clipper.Area(outerNode.Contour())) >= MIN_AREA_SQ) {
+        out.push({ outer: fromClipperPath(outerNode.Contour()), holes });
+      }
+    }
+  };
+  walk(tree);
+  return out;
 }

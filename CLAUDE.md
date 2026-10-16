@@ -40,8 +40,7 @@ Sources (parallel):                Processing (sequential):           Output:
 - `src/hooks/usePipelineStep.ts` — generic hook that runs any `PipelineStep`
 
 **Geometry output:**
-- `stamp-geometry.worker.ts` takes settings + unified `shapes` → mirrors them → builds serialized meshes (assembled into a `THREE.Group` in `StampPreview.tsx`). In cutter mode it also computes the shaped base outline and returns the cutter ring as separate `cutterMeshes`
-- `clay-geometry.ts` takes the same shapes *unmirrored* → builds inverted impression
+- `stamp-geometry.worker.ts` takes settings + unified `shapes` → mirrors them → builds serialized meshes (assembled into a `THREE.Group` in `StampPreview.tsx`). In cutter mode it also computes the shaped base outline and returns the cutter ring as separate `cutterMeshes`. With `clay: true` (the preview's Clay view) it also returns `clayMeshes`: the pressed tile, built from the shapes *unmirrored* via `clay-geometry.ts`
 - `stl-export.ts` walks the Three.js scene graph → binary STL blob → browser download
 
 ### Key libraries
@@ -73,7 +72,8 @@ Sources (parallel):                Processing (sequential):           Output:
   - `cutter-geometry.ts` — cutter ring (base outline + clearance, one wall thick) and its Z range
   - `draft-geometry.ts` — draft angle (dev-only `draftAngle` setting): relief built as a stack of 0.1 mm layers, each the design grown by the draft, so the face stays exact and walls flare toward the base. Tested in `__tests__/draft-geometry.test.ts`
   - `project.ts` — `StampProject` save/load: `.stamp.json` files (settings, texts, image, uploaded fonts as base64) and the IndexedDB autosave that `page.tsx` restores on load. `parseProject()` fills in settings added since a file was saved — add new settings to `DEFAULT_STAMP_SETTINGS` and old files keep opening
-  - `clay-geometry.ts` — builds clay impression preview (inverted stamp design, unmirrored)
+  - `clay-geometry.ts` — `clayTopShapes()`: clay tile outline minus the (unioned) design, the top layer of the clay impression preview. Tested in `__tests__/clay-geometry.test.ts`
+  - `scene-colors.ts` — all 3D scene colors (slate stamp, terracotta clay, light studio background)
   - `stl-export.ts` — binary STL writer + download helper
   - `font-manager.ts` — loads/caches bundled fonts, converts .ttf/.otf → typeface.js JSON via opentype.js
   - `text-to-shapes.ts` — converts `StampText[]` entries → `THREE.Shape[]` with position + rotation transforms
@@ -84,13 +84,15 @@ Sources (parallel):                Processing (sequential):           Output:
   - `potrace-trace.ts` — Potrace-style tracer core (optimal polygon + vertex adjustment), used by `potrace.worker.ts`
   - `curve-fit.ts` — Potrace curve fitting: polygon → Bézier curves that keep sharp corners and don't shrink the shape. Applied by both tracers; there is no separate smoothing step.
   - `medial-thicken.ts` — default thickener: widens every stroke thinner than the slicer's min perimeter width (`minPerimeterWidthPct` of nozzle) by pushing its outline edges straight outward (straight sides stay straight, square ends stay square), fills junction notches from a disc-grown fallback, rounds sharp tips, and builds the widened/rescued overlay. Pure functions, tested in `__tests__/medial-thicken.test.ts`.
-- `src/components/` — React UI. The sidebar is collapsible sections in workflow order (Design, Size, Base, Handle, Clay cutter, Printer); each shows its common controls and hides the rest behind a "More" disclosure, and shows a one-line summary while closed:
-  - `ui.tsx` — shared `Toggle`, `ToggleRow`, `Section` (collapsible, header summary + optional header toggle), `More`, `Hint`. Use these instead of hand-rolling switches/disclosures
-  - `SliderInput.tsx` — slider with a typeable value field; `onInput` fires during drag for cheap live previews, `onChange` on commit
-  - `StampPreview.tsx` — 3D stamp preview, thin-feature warnings with fix buttons, export bar below the canvas. Loaded with `next/dynamic` (SSR disabled).
+- `src/app/page.tsx` — fixed-height app shell; the page never scrolls, only the sidebar does. Header: project name (drives file names), New/Open/Save, and the one primary button, Export STL. Two layouts from one tree (`WIDE_QUERY`): desktop and landscape phones get preview left + sidebar right (accordion); portrait phones get the preview on top (expandable to full screen) and the sections as a tab bar below, so the preview stays visible while editing
+- `src/components/` — React UI. The sidebar is sections in workflow order (Design, Size, Base, Handle, Clay cutter, Printer); each shows its common controls and hides the rest behind a "More" disclosure, and shows a one-line summary while closed:
+  - `ui.tsx` — shared `Toggle`, `ToggleRow`, `Section` (accordion or tab panel, from `SectionsContext`; `focus` makes a section show itself), `More`, `Hint`, `IconButton`, `Menu`/`MenuItem`. Use these instead of hand-rolling switches/disclosures/menus. No checkboxes — use `ToggleRow`
+  - `SliderInput.tsx` — one row: label, slider, typeable value, unit; `onInput` fires during drag for cheap live previews, `onChange` on commit
+  - `StampPreview.tsx` — 3D viewport with its toolbar (Stamp/Clay view, 3D/Top camera, fit, dimensions, cutter-on-stamp, expand), `CameraRig` auto-framing, and the thin-feature warnings inside the viewport (one-line summary on phones). Hands the downloadable parts up via `onExportPartsChange` for the header's Export button. Loaded with `next/dynamic` (SSR disabled).
   - `StampSettingsPanel.tsx` — renders the Size … Printer sections. "Keep proportions" lock = `fitDimension !== "off"`; editing W or H while locked sets `fitDimension` to that dimension
   - `ImageUpload.tsx` — drop zone, compact original + B/W thumbnails, threshold; brightness/contrast/invert/color removal under "More image options"
   - `TextEditor.tsx` — text entries (font, size; letter spacing + position under "More"). Font upload lives at the bottom of `FontPicker`'s list
+- **Colors** — tokens in `globals.css`: neutrals are Tailwind `stone-*`; `accent-*` (celadon) only for primary actions and active controls; amber/red/purple only for thin-feature warnings and their 3D highlights. Light theme only. Units in the UI are always mm.
 - **`?dev` URL flag** — shows the tracer and thicken-variant pickers and developer-facing warnings. Keep algorithm choices out of the normal UI.
 - `public/fonts/` — 20 bundled static TTFs from Google Fonts (licences in `licenses/`), listed with categories in `BUNDLED_FONTS` (`font-manager.ts`). Loaded via opentype.js like uploaded fonts, and registered as `FontFace`s so `FontPicker.tsx` can preview each font in its own face
 

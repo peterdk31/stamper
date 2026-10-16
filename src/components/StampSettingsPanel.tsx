@@ -75,25 +75,29 @@ export default function StampSettingsPanel({
     <>
       <Section id="size" title="Size" defaultOpen
         summary={`${mm(settings.width)} × ${mm(settings.height)} · ${mm(settings.impressionDepth)} deep`}>
-        <SliderInput label="Width" unit="mm" value={settings.width} min={minSize} max={200} step={1}
-          onChange={(v) => update({ width: v, ...(locked && { fitDimension: "width" }) })} />
-        <div>
+        {/* Width and height, with a link that keeps the design's proportions */}
+        <div className="relative">
+          <div className="space-y-1">
+            <SliderInput label="Width" unit="mm" value={settings.width} min={minSize} max={200} step={1}
+              onChange={(v) => update({ width: v, ...(locked && { fitDimension: "width" }) })} />
+            <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
+              onChange={(v) => update({ height: v, ...(locked && { fitDimension: "height" }) })} />
+          </div>
           <button
             type="button"
             onClick={() => update({ fitDimension: locked ? "off" : "width" })}
             aria-pressed={locked}
+            aria-label="Keep proportions"
             title={locked ? "Proportions locked to the design — click to set width and height freely"
               : "Width and height are independent — click to keep the design's proportions"}
-            className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium ${
-              locked ? "bg-amber-100 text-amber-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
+            // Sits in the section's side padding, so W and H line up with the rows below
+            className={`absolute -right-4 inset-y-0 flex w-4 flex-col items-center py-3.5 ${locked ? "text-accent-600" : "text-stone-400 hover:text-stone-600"}`}
           >
-            <LockIcon locked={locked} />
-            {locked ? "Keep proportions" : "Free proportions"}
+            <span className="w-1.5 flex-1 -translate-x-1 rounded-tr border-t border-r border-current" />
+            <LinkIcon linked={locked} />
+            <span className="w-1.5 flex-1 -translate-x-1 rounded-br border-b border-r border-current" />
           </button>
         </div>
-        <SliderInput label="Height" unit="mm" value={settings.height} min={minSize} max={200} step={1}
-          onChange={(v) => update({ height: v, ...(locked && { fitDimension: "height" }) })} />
         <SliderInput label="Impression depth" unit="mm" value={settings.impressionDepth} min={0.2} max={10} step={0.1}
           onChange={(v) => update({ impressionDepth: v })} />
         {dev && (
@@ -106,11 +110,11 @@ export default function StampSettingsPanel({
         <Hint>
           {settings.cutterEnabled
             ? "Design area. The base follows the design outline (see Clay cutter)."
-            : `Design area. Plate with margin: ${(plateW / 10).toFixed(1)} × ${(plateH / 10).toFixed(1)} cm.`}
+            : `Design area. Plate with margin: ${Number(plateW.toFixed(1))} × ${mm(plateH)}.`}
         </Hint>
       </Section>
 
-      <Section title="Base"
+      <Section id="base" title="Base"
         summary={settings.cutterEnabled
           ? `follows design · ${mm(settings.baseThickness)} thick`
           : `${mm(settings.margin)} margin · ${mm(settings.cornerRadius)} corners · ${mm(settings.baseThickness)} thick`}>
@@ -132,7 +136,7 @@ export default function StampSettingsPanel({
           }} />
       </Section>
 
-      <Section title="Handle" openWhen={settings.threadEnabled}
+      <Section id="handle" title="Handle" openWhen={settings.threadEnabled}
         summary={settings.threadEnabled ? "screw-on, M10×1.5" : "off"}
         headerRight={<Toggle label="Handle" checked={settings.threadEnabled} onChange={setThreadEnabled} />}>
         <Hint>Adds an M10×1.5 threaded hole to the stamp and a separate screw-on handle to export.</Hint>
@@ -148,7 +152,7 @@ export default function StampSettingsPanel({
         )}
       </Section>
 
-      <Section title="Clay cutter" openWhen={settings.cutterEnabled}
+      <Section id="cutter" title="Clay cutter" openWhen={settings.cutterEnabled}
         summary={settings.cutterEnabled ? `${mm(cutter.offset)} offset · ${mm(cutter.clayThickness)} clay` : "off"}
         headerRight={<Toggle label="Clay cutter" checked={settings.cutterEnabled}
           onChange={(v) => update({ cutterEnabled: v })} />}>
@@ -160,7 +164,7 @@ export default function StampSettingsPanel({
             <SliderInput label="Offset" unit="mm" value={cutter.offset} min={0} max={20} step={0.5}
               onChange={(v) => updateCutter({ offset: v })} />
             <SliderInput label="Outline fidelity" value={cutter.fidelity} min={0} max={100} step={5}
-              headerRight={<span className="text-xs text-gray-500">
+              headerRight={<span className="text-xs text-stone-500">
                 {cutter.fidelity === 0 ? "rectangle" : cutter.fidelity <= 50 ? "rounder" : cutter.fidelity === 100 ? "follows design" : "smoothed"}
               </span>}
               onChange={(v) => updateCutter({ fidelity: v })} />
@@ -173,11 +177,8 @@ export default function StampSettingsPanel({
               </Hint>
             )}
             <More dot={cutter.invertInside}>
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={cutter.invertInside} className="accent-amber-700"
-                  onChange={(e) => updateCutter({ invertInside: e.target.checked })} />
-                Invert inside outline
-              </label>
+              <ToggleRow label="Invert inside outline" checked={cutter.invertInside}
+                onChange={(v) => updateCutter({ invertInside: v })} />
               <SliderInput label="Wall thickness" unit="mm" value={cutter.wallThickness} min={0.8} max={3} step={0.1}
                 onChange={(v) => updateCutter({ wallThickness: v })} />
               <SliderInput label="Grip height" unit="mm" value={Math.min(cutter.gripHeight, settings.baseThickness)}
@@ -211,7 +212,7 @@ export default function StampSettingsPanel({
           <More label="Slicer limits">
             <SliderInput label="Min perimeter width" unit="%" value={settings.minPerimeterWidthPct}
               min={25} max={150} step={1}
-              headerRight={<span className="text-xs text-gray-500">
+              headerRight={<span className="text-xs text-stone-500">
                 {(settings.nozzleDiameter * settings.minPerimeterWidthPct / 100).toFixed(2)} mm
               </span>}
               onChange={(v) => update({
@@ -220,7 +221,7 @@ export default function StampSettingsPanel({
               })} />
             <SliderInput label="Min feature size" unit="%" value={settings.minFeatureSizePct}
               min={0} max={settings.minPerimeterWidthPct} step={1}
-              headerRight={<span className="text-xs text-gray-500">
+              headerRight={<span className="text-xs text-stone-500">
                 {(settings.nozzleDiameter * settings.minFeatureSizePct / 100).toFixed(2)} mm
               </span>}
               onChange={(v) => update({ minFeatureSizePct: v })} />
@@ -234,11 +235,21 @@ export default function StampSettingsPanel({
   );
 }
 
-function LockIcon({ locked }: { locked: boolean }) {
+function LinkIcon({ linked }: { linked: boolean }) {
   return (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <rect x="5" y="11" width="14" height="10" rx="2" />
-      <path strokeLinecap="round" d={locked ? "M8 11V7a4 4 0 018 0v4" : "M8 11V7a4 4 0 017.5-2"} />
+    <svg className="my-0.5 h-3.5 w-3.5 -translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+      {linked ? (
+        <>
+          <path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7" />
+          <path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" />
+        </>
+      ) : (
+        <>
+          <path d="M15 7.5l1.5-1.5a3.5 3.5 0 015 5L20 12.5" />
+          <path d="M9 16.5L7.5 18a3.5 3.5 0 01-5-5L4 11.5" />
+          <path d="M8 3v2M3 8h2M16 21v-2M21 16h-2" />
+        </>
+      )}
     </svg>
   );
 }

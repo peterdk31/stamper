@@ -1,12 +1,14 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { useRef, useMemo, useEffect, useState, memo } from "react";
 import * as THREE from "three";
 import { createHandle } from "@/lib/handle-geometry";
 import { downloadSTL } from "@/lib/stl-export";
-import DimensionOverlay, { IMPRINT_COLOR, PLATE_COLOR, AREA_COLOR } from "./DimensionOverlay";
+import { GRID_MAJOR, GRID_MINOR, SCENE_BACKGROUND, STAMP_DESIGN } from "@/lib/scene-colors";
+import DimensionOverlay from "./DimensionOverlay";
+import { IconButton } from "./ui";
 import { plateMargin, type StampSettings, type ThinFeatureMap, type FeatureChanges } from "@/types/stamp";
 import type { StampGeoMessage, SerializedMesh } from "@/lib/stamp-geometry.worker";
 
@@ -19,7 +21,7 @@ function buildGroup(meshes: SerializedMesh[]): THREE.Group {
       geo.setAttribute("normal", new THREE.Float32BufferAttribute(m.normal, 3));
     }
     if (m.index) geo.setIndex(new THREE.BufferAttribute(m.index, 1));
-    const mat = new THREE.MeshStandardMaterial({ color: m.color });
+    const mat = new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.75 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = m.name;
     mesh.position.set(m.px, m.py, m.pz);
@@ -29,6 +31,16 @@ function buildGroup(meshes: SerializedMesh[]): THREE.Group {
   return group;
 }
 
+/** A part that can be downloaded as STL; handed up to the header's Export button. */
+export interface ExportPart {
+  id: "stamp" | "handle" | "cutter";
+  label: string;
+  download: () => void;
+}
+
+type ViewMode = "stamp" | "clay";
+type CameraView = "3d" | "top";
+
 interface Props {
   settings: StampSettings;
   shapes: THREE.Shape[];
@@ -36,16 +48,36 @@ interface Props {
   thinFeatureMap: ThinFeatureMap | null;
   /** Turns thickening on; offered when the slicer would widen or drop strokes. */
   onEnableThicken: () => void;
+  /** Shows the Size settings; offered when strokes stay too thin. */
+  onShowSize: () => void;
+  /** Called whenever the downloadable parts change. */
+  onExportPartsChange: (parts: ExportPart[]) => void;
+  /** Phone layout: the preview can be expanded to fill the screen. */
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+  /** Shown over the viewport (pipeline progress). */
+  overlay?: React.ReactNode;
   dev: boolean;
 }
 
-function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableThicken, dev }: Props) {
-  const stampRef = useRef<THREE.Group>(null);
+function StampPreview({
+  settings, shapes, exportName, thinFeatureMap, onEnableThicken, onShowSize, onExportPartsChange,
+  expanded, onToggleExpand, overlay, dev,
+}: Props) {
   const geoWorkerRef = useRef<Worker | null>(null);
   const [stampGroup, setStampGroup] = useState<THREE.Group | null>(null);
   const [cutterGroup, setCutterGroup] = useState<THREE.Group | null>(null);
+  const [clayGroup, setClayGroup] = useState<THREE.Group | null>(null);
   const [cutterOnStamp, setCutterOnStamp] = useState(false);
   const [showDimensions, setShowDimensions] = useState(true);
+  const [showHighlights, setShowHighlights] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>("stamp");
+  const [cameraView, setCameraView] = useState<CameraView>("3d");
+  const [fitRequest, setFitRequest] = useState(0);
+  const [warningDetails, setWarningDetails] = useState(false);
+  const clay = viewMode === "clay";
+  // Phone layout (the expandable preview): warnings start as a one-line summary
+  const compactWarnings = !!onToggleExpand && !warningDetails;
 
   useEffect(() => {
     const shapeData = shapes.map(s => ({
@@ -60,12 +92,13 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
 
     worker.onmessage = (e: MessageEvent<StampGeoMessage>) => {
       if (geoWorkerRef.current !== worker) return;
-      const { meshes, cutterMeshes, normalColor } = e.data;
+      const { meshes, cutterMeshes, clayMeshes, normalColor } = e.data;
 
       const group = buildGroup(meshes);
       group.userData.normalColor = normalColor;
       setStampGroup(group);
       setCutterGroup(cutterMeshes.length > 0 ? buildGroup(cutterMeshes) : null);
+      setClayGroup(clayMeshes.length > 0 ? buildGroup(clayMeshes) : null);
 
       worker.terminate();
       geoWorkerRef.current = null;
@@ -88,6 +121,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
       threadEnabled: settings.threadEnabled,
       threadConfig: settings.threadConfig,
       cutter: settings.cutterEnabled ? settings.cutterConfig : null,
+      clay,
     });
 
     return () => {
@@ -95,25 +129,26 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
       if (geoWorkerRef.current === worker) geoWorkerRef.current = null;
     };
   }, [shapes, settings.width, settings.height, settings.margin, settings.baseThickness, settings.impressionDepth,
-      settings.draftAngle, settings.cornerRadius, settings.threadEnabled, settings.threadConfig, settings.cutterEnabled, settings.cutterConfig]);
+      settings.draftAngle, settings.cornerRadius, settings.threadEnabled, settings.threadConfig, settings.cutterEnabled,
+      settings.cutterConfig, clay]);
+
+  const hasChanges = !!thinFeatureMap?.changes?.widened || !!thinFeatureMap?.changes?.rescued;
+  const hasIssues = !!thinFeatureMap && (thinFeatureMap.hasThinFeatures || hasChanges);
 
   useEffect(() => {
     if (!stampGroup) return;
     const designMesh = stampGroup.getObjectByName("design") as THREE.Mesh | undefined;
     if (!designMesh) return;
+    const material = designMesh.material as THREE.MeshStandardMaterial;
+    const normalColor = (stampGroup.userData.normalColor as number) || STAMP_DESIGN;
 
-    const showOverlay = !!thinFeatureMap && (
-      thinFeatureMap.hasThinFeatures || !!thinFeatureMap.changes?.widened || !!thinFeatureMap.changes?.rescued
-    );
-    if (!thinFeatureMap || !showOverlay) {
-      const normalColor = (stampGroup.userData.normalColor as number) ?? 0x8b5e3c;
-      (designMesh.material as THREE.MeshStandardMaterial).map = null;
-      (designMesh.material as THREE.MeshStandardMaterial).color.setHex(normalColor);
-      (designMesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
+    if (!thinFeatureMap || !hasIssues || !showHighlights) {
+      material.map = null;
+      material.color.setHex(normalColor);
+      material.needsUpdate = true;
       return;
     }
 
-    const normalColor = (stampGroup.userData.normalColor as number) ?? 0x8b5e3c;
     const nr = (normalColor >> 16) & 0xff;
     const ng = (normalColor >> 8) & 0xff;
     const nb = normalColor & 0xff;
@@ -129,6 +164,7 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
     }
 
     const tex = new THREE.DataTexture(pixels, thinFeatureMap.gridW, thinFeatureMap.gridH);
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     tex.magFilter = THREE.NearestFilter;
     tex.minFilter = THREE.NearestFilter;
@@ -142,10 +178,10 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
     }
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
 
-    (designMesh.material as THREE.MeshStandardMaterial).map = tex;
-    (designMesh.material as THREE.MeshStandardMaterial).color.setHex(0xffffff);
-    (designMesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
-  }, [stampGroup, thinFeatureMap, settings.width, settings.height]);
+    material.map = tex;
+    material.color.setHex(0xffffff);
+    material.needsUpdate = true;
+  }, [stampGroup, thinFeatureMap, hasIssues, showHighlights, settings.width, settings.height]);
 
   const handleGroup = useMemo(() => {
     if (!settings.threadEnabled) return null;
@@ -166,145 +202,250 @@ function StampPreview({ settings, shapes, exportName, thinFeatureMap, onEnableTh
     cutterGroup.position.set(0, cutterOnStamp ? 0 : -(settings.height + reach * 2 + gap), 0);
   }, [cutterGroup, cutterOnStamp, settings.height, settings.cutterConfig]);
 
-  const center = useMemo(() => {
-    return new THREE.Vector3(
-      settings.width / 2,
-      settings.height / 2,
-      (settings.baseThickness + settings.impressionDepth) / 2,
-    );
-  }, [settings.width, settings.height, settings.baseThickness, settings.impressionDepth]);
+  // The header's Export button downloads whatever is built
+  useEffect(() => {
+    const parts: ExportPart[] = [];
+    if (stampGroup) parts.push({ id: "stamp", label: "Stamp", download: () => downloadSTL(stampGroup, `${exportName}-stamp.stl`) });
+    if (settings.threadEnabled) {
+      const config = settings.threadConfig;
+      parts.push({ id: "handle", label: "Handle", download: () => downloadSTL(createHandle(config), `${exportName}-handle.stl`) });
+    }
+    if (settings.cutterEnabled && cutterGroup) {
+      parts.push({ id: "cutter", label: "Clay cutter", download: () => downloadSTL(cutterGroup, `${exportName}-cutter.stl`) });
+    }
+    onExportPartsChange(parts);
+  }, [stampGroup, cutterGroup, settings.threadEnabled, settings.threadConfig, settings.cutterEnabled, exportName, onExportPartsChange]);
 
-  function handleExportStamp() {
-    if (!stampRef.current) return;
-    downloadSTL(stampRef.current, `${exportName}-stamp.stl`);
-  }
+  const physW = settings.width + plateMargin(settings) * 2;
+  const physH = settings.height + plateMargin(settings) * 2;
+  const showCutter = !clay && settings.cutterEnabled && !!cutterGroup;
+  const fitObjects = clay ? [clayGroup] : [stampGroup, handleGroup, showCutter ? cutterGroup : null];
 
-  function handleExportCutter() {
-    if (!cutterGroup) return;
-    downloadSTL(cutterGroup, `${exportName}-cutter.stl`);
-  }
-
-  function handleExportHandle() {
-    const handle = createHandle(settings.threadConfig);
-    downloadSTL(handle, `${exportName}-handle.stl`);
+  function pickView(view: CameraView) {
+    setCameraView(view);
+    setFitRequest((n) => n + 1);
   }
 
   return (
-    <div className="flex flex-col gap-2 h-full">
-      <div className="relative bg-gray-900 rounded-lg overflow-hidden flex-1 min-h-0">
-        <Canvas camera={{ position: [60, 60, 60], fov: 45 }}>
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[50, 50, 50]} intensity={1} />
-          {stampGroup && <primitive ref={stampRef} object={stampGroup} />}
-          {handleGroup && <primitive object={handleGroup} />}
-          {settings.cutterEnabled && cutterGroup && <primitive object={cutterGroup} />}
-          {/* Sibling of the stamp group, not a child, so it never ends up in the STL */}
-          {showDimensions && <DimensionOverlay settings={settings} shapes={shapes} />}
-          <OrbitControls target={center} />
-          <gridHelper args={[200, 20, 0x444444, 0x222222]} rotation={[Math.PI / 2, 0, 0]} />
-        </Canvas>
+    <div className="relative h-full w-full overflow-hidden" style={{ background: SCENE_BACKGROUND }}>
+      <Canvas camera={{ position: [40, -90, 80], fov: 40, up: [0, 0, 1] }}>
+        <color attach="background" args={[SCENE_BACKGROUND]} />
+        <hemisphereLight args={[0xffffff, 0xb8b0a5, 1.1]} />
+        <directionalLight position={[40, -60, 100]} intensity={1.6} />
+        <directionalLight position={[-60, 50, 40]} intensity={0.4} />
+        {stampGroup && <primitive object={stampGroup} visible={!clay} />}
+        {handleGroup && <primitive object={handleGroup} visible={!clay} />}
+        {cutterGroup && <primitive object={cutterGroup} visible={showCutter} />}
+        {clayGroup && <primitive object={clayGroup} visible={clay} />}
+        {/* Sibling of the stamp group, not a child, so it never ends up in the STL */}
+        {showDimensions && !clay && <DimensionOverlay settings={settings} shapes={shapes} />}
+        <OrbitControls makeDefault />
+        <CameraRig objects={fitObjects} view={cameraView} fitRequest={fitRequest} />
+        <gridHelper args={[200, 20, GRID_MAJOR, GRID_MINOR]} rotation={[Math.PI / 2, 0, 0]}
+          position={[Math.round(physW / 20) * 10, Math.round(physH / 20) * 10, -0.01]} />
+      </Canvas>
 
-        <div className="absolute top-2 left-2 z-20 rounded bg-gray-900/80 px-2 py-1 text-xs text-gray-200 select-none sm:top-3 sm:left-3">
-          <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={showDimensions}
-              onChange={e => setShowDimensions(e.target.checked)}
-            />
-            Dimensions
-          </label>
-          {showDimensions && (
-            <ul className="mt-1 space-y-0.5 text-gray-300">
-              <LegendItem color={IMPRINT_COLOR}>imprint in clay</LegendItem>
-              {!settings.cutterEnabled && <LegendItem color={PLATE_COLOR}>plate (design area + 2 × margin)</LegendItem>}
-              <LegendItem color={AREA_COLOR} dashed>design area (Width × Height)</LegendItem>
-            </ul>
+      {/* Toolbar */}
+      <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-wrap items-start justify-between gap-2">
+        <Segmented value={viewMode} onChange={setViewMode} options={[
+          { id: "stamp", label: "Stamp", title: "The stamp as printed (the design is mirrored)" },
+          { id: "clay", label: "Clay", title: "The impression it leaves in clay" },
+        ]} />
+        <div className="pointer-events-auto flex items-center gap-0.5 rounded-md border border-stone-300/70 bg-white/90 p-0.5 shadow-sm">
+          <Segmented bare value={cameraView} onChange={pickView} options={[
+            { id: "3d", label: "3D", title: "Angled view" },
+            { id: "top", label: "Top", title: "Straight down onto the face" },
+          ]} />
+          <IconButton title="Fit to view" onClick={() => setFitRequest((n) => n + 1)}>
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+            </svg>
+          </IconButton>
+          {!clay && (
+            <IconButton title="Dimensions: imprint size (dark), plate size (gray), design area (dashed)"
+              pressed={showDimensions} onClick={() => setShowDimensions((v) => !v)}>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <path d="M3 8h18v8H3zM7 8v3M11 8v4M15 8v3M19 8v4" />
+              </svg>
+            </IconButton>
           )}
-          {settings.cutterEnabled && (
-            <label className="mt-1 flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={cutterOnStamp}
-                onChange={e => setCutterOnStamp(e.target.checked)}
-              />
-              Cutter on stamp
-            </label>
+          {settings.cutterEnabled && !clay && (
+            <IconButton title="Slide the cutter onto the stamp to check the fit" pressed={cutterOnStamp}
+              onClick={() => setCutterOnStamp((v) => !v)}>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <rect x="7.5" y="7.5" width="9" height="9" rx="1" />
+              </svg>
+            </IconButton>
+          )}
+          {onToggleExpand && (
+            <IconButton title={expanded ? "Show settings" : "Expand preview"} onClick={onToggleExpand}>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <path d={expanded ? "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" : "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5M9 9l-5-5M15 9l5-5M9 15l-5 5M15 15l5 5"} />
+              </svg>
+            </IconButton>
           )}
         </div>
       </div>
 
-      {thinFeatureMap?.changes
-        ? <FeatureChangesLegend changes={thinFeatureMap.changes} residual={thinFeatureMap.hasThinFeatures}
-            onEnableThicken={onEnableThicken} dev={dev} />
-        : thinFeatureMap?.hasThinFeatures && (
-          <p className="text-sm text-red-600">
-            Some features are thinner than {settings.nozzleDiameter} mm (highlighted in red).
-            {" "}<FixButton onClick={onEnableThicken}>Thicken them</FixButton>
+      {overlay}
+
+      {/* Thin-feature messages, kept inside the viewport so the layout never jumps */}
+      <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-col items-start gap-1">
+        {shapes.length === 0 && (
+          <p className="self-center rounded bg-white/90 px-2 py-1 text-xs text-stone-600 shadow-sm">
+            Add an image or text to start
           </p>
         )}
-
-      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 shadow">
-        <span className="text-sm font-semibold text-gray-700 mr-auto">Export STL</span>
-        <ExportButton onClick={handleExportStamp} disabled={!stampGroup}>Stamp</ExportButton>
-        {settings.threadEnabled && <ExportButton onClick={handleExportHandle}>Handle</ExportButton>}
-        {settings.cutterEnabled && <ExportButton onClick={handleExportCutter} disabled={!cutterGroup}>Cutter</ExportButton>}
+        {!clay && thinFeatureMap && hasIssues && (
+          <div className="pointer-events-auto max-w-full space-y-1 rounded-md border border-stone-300/70 bg-white/95 px-2.5 py-1.5 text-xs shadow-sm sm:text-sm">
+            {compactWarnings ? (
+              <p className="flex items-center gap-1.5 text-stone-700">
+                {thinFeatureMap.hasThinFeatures && <Swatch className={hasChanges ? "bg-purple-600" : "bg-red-600"} />}
+                {thinFeatureMap.changes?.widened && <Swatch className="bg-amber-500" />}
+                {thinFeatureMap.changes?.rescued && <Swatch className="bg-red-600" />}
+                Some strokes are too thin to print 1:1
+                <FixButton onClick={() => setWarningDetails(true)}>Details</FixButton>
+              </p>
+            ) : (
+              <>
+                {thinFeatureMap.changes && hasChanges
+                  ? <FeatureChangesLegend changes={thinFeatureMap.changes} residual={thinFeatureMap.hasThinFeatures}
+                      onEnableThicken={onEnableThicken} onShowSize={onShowSize} dev={dev} />
+                  : (
+                    <p className="text-red-700">
+                      <Swatch className="bg-red-600" />
+                      Some features are thinner than {settings.nozzleDiameter} mm.
+                      <FixButton onClick={onEnableThicken}>Thicken them</FixButton>
+                    </p>
+                  )}
+                <div className="flex gap-3 text-xs text-stone-500">
+                  <button type="button" onClick={() => setShowHighlights((v) => !v)} className="underline hover:text-stone-800">
+                    {showHighlights ? "Hide highlights" : "Show highlights on the stamp"}
+                  </button>
+                  {onToggleExpand && (
+                    <button type="button" onClick={() => setWarningDetails(false)} className="underline hover:text-stone-800">
+                      Less
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function ExportButton({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+/**
+ * Frames the visible parts: on a preset or Fit click from the preset direction,
+ * otherwise (the parts changed size, the viewport was resized) from where the
+ * camera is now, so orbiting isn't undone by every settings change.
+ */
+function CameraRig({ objects, view, fitRequest }: {
+  objects: (THREE.Object3D | null)[];
+  view: CameraView;
+  fitRequest: number;
+}) {
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
+  const size = useThree((s) => s.size);
+  const last = useRef<{ box: THREE.Box3; aspect: number; fitRequest: number } | null>(null);
+  const [a, b, c] = objects;
+
+  useEffect(() => {
+    if (!controls) return;
+    // Next frame: the cutter's position is set by an effect outside the canvas
+    const frame = requestAnimationFrame(() => {
+      const box = new THREE.Box3();
+      for (const o of [a, b, c]) {
+        if (!o) continue;
+        o.updateMatrixWorld(true);
+        box.expandByObject(o);
+      }
+      if (box.isEmpty()) return;
+      const aspect = size.width / Math.max(1, size.height);
+      const prev = last.current;
+      const forced = !prev || prev.fitRequest !== fitRequest;
+      const changed = !prev || Math.abs(prev.aspect - aspect) > 0.01
+        || prev.box.min.distanceTo(box.min) + prev.box.max.distanceTo(box.max) > 0.5;
+      if (!forced && !changed) return;
+      last.current = { box, aspect, fitRequest };
+
+      const dir = forced
+        ? (view === "top" ? new THREE.Vector3(0, -0.01, 1) : new THREE.Vector3(0.35, -1, 1.05)).normalize()
+        : camera.position.clone().sub(controls.target).normalize();
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const vfov = (camera.fov * Math.PI) / 180;
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+      const dist = (sphere.radius / Math.sin(Math.min(vfov, hfov) / 2)) * 0.95;
+      controls.target.copy(sphere.center);
+      camera.position.copy(sphere.center).addScaledVector(dir, dist);
+      camera.near = dist / 100;
+      camera.far = dist * 100;
+      camera.updateProjectionMatrix();
+      controls.update();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [a, b, c, view, fitRequest, controls, camera, size.width, size.height]);
+
+  return null;
+}
+
+function Segmented<T extends string>({ value, options, onChange, bare }: {
+  value: T;
+  options: { id: T; label: string; title: string }[];
+  onChange: (id: T) => void;
+  /** No frame of its own (it sits inside another toolbar group). */
+  bare?: boolean;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-700 text-white rounded hover:bg-amber-800 font-medium text-sm disabled:opacity-50"
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14" />
-      </svg>
-      {children}
-    </button>
+    <div className={`pointer-events-auto flex ${bare ? "" : "rounded-md border border-stone-300/70 bg-white/90 p-0.5 shadow-sm"}`}>
+      {options.map((o) => (
+        <button key={o.id} type="button" onClick={() => onChange(o.id)} title={o.title} aria-pressed={value === o.id}
+          className={`h-8 rounded px-2.5 text-sm font-medium ${
+            value === o.id ? "bg-accent-600 text-white" : "text-stone-600 hover:bg-stone-200 hover:text-stone-900"
+          }`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
 function FixButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick}
-      className="ml-1 rounded border border-current px-1.5 py-px text-xs font-medium hover:bg-white">
+      className="ml-1.5 rounded border border-current px-1.5 py-px text-xs font-medium hover:bg-white">
       {children}
     </button>
   );
 }
 
-function scrollToSize() {
-  document.getElementById("size")?.scrollIntoView({ block: "start" });
-}
-
-function FeatureChangesLegend({ changes, residual, onEnableThicken, dev }: {
+function FeatureChangesLegend({ changes, residual, onEnableThicken, onShowSize, dev }: {
   changes: FeatureChanges;
   residual: boolean;
   onEnableThicken: () => void;
+  onShowSize: () => void;
   dev: boolean;
 }) {
   const target = changes.targetWidth.toFixed(2);
   const minFeature = changes.minFeatureSize.toFixed(2);
-  if (!changes.widened && !changes.rescued) return null;
   return (
-    <div className="space-y-0.5 text-sm">
+    <>
       {residual && (
         <p className="text-purple-700">
           <Swatch className="bg-purple-600" />
           {dev
             ? `Still thinner than ${target} mm after thickening — this is a bug. Try the Clipper or EDT variant.`
             : `Some strokes are still thinner than ${target} mm and may not print.`}
-          {!dev && <FixButton onClick={scrollToSize}>Enlarge stamp</FixButton>}
+          {!dev && <FixButton onClick={onShowSize}>Enlarge stamp</FixButton>}
         </p>
       )}
       {changes.widened && (
         <p className="text-amber-700">
-          <Swatch className="bg-amber-600" />
+          <Swatch className="bg-amber-500" />
           {changes.thickened
             ? `Widened to ${target} mm — prints, but bolder than designed.`
             : `Thinner than ${target} mm — the slicer will widen these.`}
@@ -312,31 +453,22 @@ function FeatureChangesLegend({ changes, residual, onEnableThicken, dev }: {
         </p>
       )}
       {changes.rescued && (
-        <p className="text-red-600">
+        <p className="text-red-700">
           <Swatch className="bg-red-600" />
           {changes.thickened
             ? `Was under ${minFeature} mm and would not have printed — now far from 1:1.`
             : `Thinner than ${minFeature} mm — the slicer will drop these.`}
           {changes.thickened
-            ? <FixButton onClick={scrollToSize}>Enlarge stamp</FixButton>
+            ? <FixButton onClick={onShowSize}>Enlarge stamp</FixButton>
             : <FixButton onClick={onEnableThicken}>Thicken them</FixButton>}
         </p>
       )}
-    </div>
-  );
-}
-
-function LegendItem({ color, dashed, children }: { color: string; dashed?: boolean; children: React.ReactNode }) {
-  return (
-    <li className="flex items-center gap-1.5">
-      <span className="inline-block w-3" style={{ borderTop: `2px ${dashed ? "dashed" : "solid"} ${color}` }} />
-      {children}
-    </li>
+    </>
   );
 }
 
 function Swatch({ className }: { className: string }) {
-  return <span className={`inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-baseline ${className}`} />;
+  return <span className={`inline-block w-2.5 h-2.5 shrink-0 rounded-sm mr-1.5 align-baseline ${className}`} />;
 }
 
 export default memo(StampPreview);

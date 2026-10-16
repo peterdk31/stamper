@@ -183,13 +183,13 @@ export default function ColorPickerModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-stone-200">
           <h2 className="text-lg font-semibold">Color Picker</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">&times;</button>
         </div>
 
         <div className="flex-1 overflow-auto p-4 space-y-4">
-          <p className="text-sm text-gray-500">Click the original image to sample a color to remove</p>
+          <p className="text-sm text-stone-500">Click the original image to sample a color to remove</p>
           <div className="flex gap-4 justify-center items-start">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -206,7 +206,7 @@ export default function ColorPickerModal({
               {colorMasks.map((mask, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <div
-                    className="w-6 h-6 rounded-full border border-gray-300 shrink-0"
+                    className="w-6 h-6 rounded-full border border-stone-300 shrink-0"
                     style={{ backgroundColor: `hsl(${mask.hue}, ${mask.saturation}%, ${mask.lightness}%)` }}
                   />
                   <input
@@ -215,12 +215,12 @@ export default function ColorPickerModal({
                     max={90}
                     value={mask.tolerance}
                     onChange={(e) => updateTolerance(i, Number(e.target.value))}
-                    className="flex-1 accent-amber-500"
+                    className="flex-1 accent-accent-600"
                   />
-                  <span className="text-sm text-gray-600 w-10 text-right">{mask.tolerance}&deg;</span>
+                  <span className="text-sm text-stone-600 w-10 text-right">{mask.tolerance}&deg;</span>
                   <button
                     onClick={() => removeMask(i)}
-                    className="text-gray-400 hover:text-red-500 text-lg leading-none"
+                    className="text-stone-400 hover:text-red-500 text-lg leading-none"
                     title="Remove"
                   >&times;</button>
                 </div>

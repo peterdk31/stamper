@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { ColorMask, ProjectImage } from "@/types/stamp";
 import ColorPickerModal from "./ColorPickerModal";
 import SliderInput from "./SliderInput";
-import { More } from "./ui";
+import { More, ToggleRow } from "./ui";
 
 interface Props {
   image: ProjectImage | null;
@@ -212,24 +212,24 @@ export default function ImageUpload({
 
       {hasContent ? (
         <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()} className="space-y-2">
-          <div className="relative flex gap-2 rounded border border-gray-200 bg-gray-50 p-1.5">
+          <div className="relative flex gap-2 rounded border border-stone-200 bg-stone-50 p-1.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageSource!} alt="Original" title="Original"
-              className="h-28 min-w-0 flex-1 object-contain" />
+              className="h-24 min-w-0 flex-1 object-contain" />
             <canvas ref={canvasRef} title="What gets traced"
-              className="h-28 min-w-0 flex-1 object-contain" />
+              className="h-24 min-w-0 flex-1 object-contain" />
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-white/70">
-                <div className="h-6 w-6 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                <div className="h-6 w-6 border-3 border-accent-500 border-t-transparent rounded-full animate-spin" />
               </div>
             )}
           </div>
           <div className="flex items-center gap-3 text-sm">
-            <span className="flex-1 truncate text-gray-600" title={fileName ?? undefined}>
+            <span className="flex-1 truncate text-stone-600" title={fileName ?? undefined}>
               {fileName ?? (svgText ? "SVG" : "Image")}
             </span>
             <button type="button" onClick={() => inputRef.current?.click()} disabled={isProcessing}
-              className="text-amber-700 hover:text-amber-900 disabled:opacity-50">
+              className="text-accent-700 hover:text-accent-800 disabled:opacity-50">
               Replace
             </button>
             <button type="button" onClick={handleClear} disabled={isProcessing}
@@ -244,20 +244,20 @@ export default function ImageUpload({
           onDragOver={(e) => e.preventDefault()}
           onClick={() => !isProcessing && inputRef.current?.click()}
           className={`rounded-lg border-2 border-dashed p-4 text-center ${
-            isProcessing ? "border-amber-400 cursor-wait" : "border-gray-300 cursor-pointer hover:border-amber-500"
+            isProcessing ? "border-accent-200 cursor-wait" : "border-stone-300 cursor-pointer hover:border-accent-500"
           }`}
         >
           {isProcessing ? (
             <div className="space-y-2">
-              <p className="text-sm text-gray-600">{progressStage}</p>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-amber-500 h-2 rounded-full" style={{ width: `${Math.round(progress * 100)}%` }} />
+              <p className="text-sm text-stone-600">{progressStage}</p>
+              <div className="w-full bg-stone-200 rounded-full h-2">
+                <div className="bg-accent-500 h-2 rounded-full" style={{ width: `${Math.round(progress * 100)}%` }} />
               </div>
             </div>
           ) : (
             <>
-              <p className="text-sm text-gray-700">Drop an image or SVG here, or click to upload</p>
-              <p className="mt-0.5 text-xs text-gray-400">Dark areas become the raised design</p>
+              <p className="text-sm text-stone-700">Drop an image or SVG here, or click to upload</p>
+              <p className="mt-0.5 text-xs text-stone-400">Dark areas become the raised design</p>
             </>
           )}
         </div>
@@ -276,18 +276,15 @@ export default function ImageUpload({
             <SliderInput label="Contrast" value={contrast} min={-100} max={100} step={1}
               onInput={(v) => preview({ contrast: v })}
               onChange={(v) => onContrastChange?.(v)} />
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input type="checkbox" checked={invert} onChange={(e) => onInvertChange?.(e.target.checked)}
-                className="accent-amber-700" />
-              Invert (light areas become the design)
-            </label>
+            <ToggleRow label="Invert (light areas become the design)" checked={invert}
+              onChange={(v) => onInvertChange?.(v)} />
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => setPickerOpen(true)}
-                className="text-sm text-amber-700 hover:text-amber-900">
+                className="text-sm text-accent-700 hover:text-accent-800">
                 Pick colors to remove…
               </button>
               {colorMasks.map((mask, i) => (
-                <span key={i} className="w-4 h-4 rounded-full border border-gray-300"
+                <span key={i} className="w-4 h-4 rounded-full border border-stone-300"
                   style={{ backgroundColor: `hsl(${mask.hue}, ${mask.saturation}%, ${mask.lightness}%)` }}
                   title={`${Math.round(mask.hue)}° ±${mask.tolerance}`} />
               ))}
@@ -302,7 +299,7 @@ export default function ImageUpload({
                   onColorMasksChange?.([]);
                   onInvertChange?.(false);
                 }}
-                className="text-xs text-gray-500 hover:text-gray-800 underline"
+                className="text-xs text-stone-500 hover:text-stone-800 underline"
               >
                 Reset image options
               </button>

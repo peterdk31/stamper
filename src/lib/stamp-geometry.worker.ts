@@ -7,6 +7,8 @@ import { createFemaleThreadGeometry } from "./thread-geometry";
 import { computeBaseOutline } from "./base-outline";
 import { cutterRing, cutterZRange } from "./cutter-geometry";
 import { draftLayers } from "./draft-geometry";
+import { CLAY, CUTTER, STAMP_BASE, STAMP_DESIGN, STAMP_THREAD } from "./scene-colors";
+import { clayTopShapes } from "./clay-geometry";
 
 interface PointData { x: number; y: number }
 interface ShapeInput { outer: PointData[]; holes: PointData[][] }
@@ -25,6 +27,8 @@ interface GeometryRequest {
   threadConfig: ThreadConfig;
   /** Cutter mode: the base follows the design and a cutter ring is built. */
   cutter: CutterConfig | null;
+  /** Also build the clay impression preview. */
+  clay: boolean;
 }
 
 export interface SerializedMesh {
@@ -42,6 +46,8 @@ export type StampGeoMessage = {
   meshes: SerializedMesh[];
   /** Cutter ring, in stamp coordinates (it fits around the base as built). Empty without cutter mode. */
   cutterMeshes: SerializedMesh[];
+  /** Pressed clay tile, unmirrored, in the stamp's footprint. Empty unless requested. */
+  clayMeshes: SerializedMesh[];
   normalColor: number;
 };
 
@@ -130,12 +136,12 @@ function draftedDesignGeometry(shapes: Shape[], depth: number, angle: number): B
 }
 
 self.onmessage = (e: MessageEvent<GeometryRequest>) => {
-  const { shapes: shapeData, width, height, margin, baseThickness, impressionDepth, draftAngle, cornerRadius, threadEnabled, threadConfig, cutter } = e.data;
+  const { shapes: shapeData, width, height, margin, baseThickness, impressionDepth, draftAngle, cornerRadius, threadEnabled, threadConfig, cutter, clay } = e.data;
 
   const physW = width + margin * 2;
   const physH = height + margin * 2;
 
-  const baseColor = 0xd4a373;
+  const baseColor = STAMP_BASE;
   const meshes: SerializedMesh[] = [];
 
   const shapes = toShapes(shapeData);
@@ -183,7 +189,7 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
   }
 
   if (mirrored.length > 0) {
-    normalColor = 0x8b5e3c;
+    normalColor = STAMP_DESIGN;
     const geo = draftAngle > 0
       ? draftedDesignGeometry(mirrored, impressionDepth, draftAngle)
       : new ExtrudeGeometry(mirrored, { depth: impressionDepth + OVERLAP, bevelEnabled: false });
@@ -195,7 +201,7 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
     const normAttr = threadGeo.getAttribute("normal");
     meshes.push({
       name: "thread",
-      color: 0x6b4226,
+      color: STAMP_THREAD,
       position: new Float32Array(threadGeo.getAttribute("position").array),
       normal: normAttr ? new Float32Array(normAttr.array) : new Float32Array(0),
       index: threadGeo.index ? new Uint32Array(threadGeo.index.array) : null,
@@ -212,16 +218,39 @@ self.onmessage = (e: MessageEvent<GeometryRequest>) => {
     if (ring) {
       const { bottom, top } = cutterZRange(baseThickness, cutter.gripHeight, cutter.clayThickness);
       const geo = new ExtrudeGeometry(pointsToShape(ring.outer, [ring.inner]), { depth: top - bottom, bevelEnabled: false });
-      cutterMeshes.push(serializeGeo(geo, "cutter", 0xc4521a, 0, 0, bottom));
+      cutterMeshes.push(serializeGeo(geo, "cutter", CUTTER, 0, 0, bottom));
+    }
+  }
+
+  // The tile is what the cutter cuts (base outline + clearance), or the plate without a cutter
+  const clayMeshes: SerializedMesh[] = [];
+  if (clay) {
+    const tile = outline
+      ? cutterRing(outline.map(p => ({ x: margin + p.x, y: margin + p.y })), cutter!.clearance, cutter!.wallThickness)?.inner
+      : createRoundedRectShape(physW, physH, cornerRadius).getPoints().map(p => ({ x: p.x, y: p.y }));
+    if (tile) {
+      const thickness = Math.max(cutter?.clayThickness ?? 6, impressionDepth + 1);
+      const solidDepth = thickness - impressionDepth;
+      const design = shapeData.map(sd => ({
+        outer: sd.outer.map(p => ({ x: margin + p.x, y: margin + p.y })),
+        holes: sd.holes.map(h => h.map(p => ({ x: margin + p.x, y: margin + p.y }))),
+      }));
+      const slab = new ExtrudeGeometry(pointsToShape(tile), { depth: solidDepth + OVERLAP, bevelEnabled: false });
+      clayMeshes.push(serializeGeo(slab, "clay", CLAY));
+      const top = clayTopShapes(tile, design).filter(s => s.outer.length >= 3);
+      if (top.length > 0) {
+        const geo = new ExtrudeGeometry(top.map(s => pointsToShape(s.outer, s.holes)), { depth: impressionDepth, bevelEnabled: false });
+        clayMeshes.push(serializeGeo(geo, "clay-top", CLAY, 0, 0, solidDepth));
+      }
     }
   }
 
   const transferable: Transferable[] = [];
-  for (const m of [...meshes, ...cutterMeshes]) {
+  for (const m of [...meshes, ...cutterMeshes, ...clayMeshes]) {
     transferable.push(m.position.buffer as ArrayBuffer);
     transferable.push(m.normal.buffer as ArrayBuffer);
     if (m.index) transferable.push(m.index.buffer as ArrayBuffer);
   }
 
-  postMessage({ type: "result", meshes, cutterMeshes, normalColor } satisfies StampGeoMessage, { transfer: transferable });
+  postMessage({ type: "result", meshes, cutterMeshes, clayMeshes, normalColor } satisfies StampGeoMessage, { transfer: transferable });
 };

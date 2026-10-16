@@ -53,32 +53,13 @@ export default function SliderInput({
     if (fixed !== value) onChange(fixed);
   }
 
+  // One row: label, slider, typeable value, unit. `headerRight` is a note under the label.
   return (
-    <div className={disabled ? "opacity-50" : ""}>
+    <div className={`flex items-center gap-2 ${disabled ? "opacity-50" : ""}`}>
       {(label != null || headerRight) && (
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-baseline gap-2 min-w-0">
-            {label != null && <label className="text-sm font-medium text-gray-700">{label}</label>}
-            {headerRight}
-          </div>
-          <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
-            <input
-              type="text"
-              inputMode="decimal"
-              aria-label={label}
-              disabled={disabled}
-              value={draft ?? display}
-              onFocus={(e) => { setDraft(display); e.target.select(); }}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commitDraft}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
-              }}
-              className="w-14 rounded border border-gray-200 px-1 py-0.5 text-right tabular-nums text-gray-800 hover:border-gray-400 focus:border-amber-600 focus:outline-none"
-            />
-            {unit && <span className="w-5">{unit}</span>}
-          </span>
+        <div className="w-28 shrink-0 leading-tight">
+          {label != null && <label className="text-sm text-stone-700">{label}</label>}
+          {headerRight && <div className="text-xs text-stone-500">{headerRight}</div>}
         </div>
       )}
       <input
@@ -98,8 +79,24 @@ export default function SliderInput({
         }}
         onPointerUp={commit}
         onLostPointerCapture={commit}
-        className="w-full accent-amber-700"
+        className="min-w-0 flex-1 accent-accent-600"
       />
+      <input
+        type="text"
+        inputMode="decimal"
+        aria-label={label}
+        disabled={disabled}
+        value={draft ?? display}
+        onFocus={(e) => { setDraft(display); e.target.select(); }}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commitDraft}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
+        }}
+        className="w-14 shrink-0 rounded border border-stone-200 px-1 py-0.5 text-right text-sm tabular-nums text-stone-800 hover:border-stone-400 focus:border-accent-600 focus:outline-none"
+      />
+      <span className="w-6 shrink-0 text-xs text-stone-500">{unit}</span>
     </div>
   );
 }

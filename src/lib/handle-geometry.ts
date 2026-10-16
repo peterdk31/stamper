@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import type { ThreadConfig } from "@/types/stamp";
 import { createMaleThreadGeometry } from "./thread-geometry";
+import { HANDLE, STAMP_THREAD } from "./scene-colors";
 
-const HANDLE_COLOR = 0xd4a373;
-const THREAD_COLOR = 0x8b5e3c;
+const HANDLE_COLOR = HANDLE;
+const THREAD_COLOR = STAMP_THREAD;
 
 export function createHandle(threadConfig: ThreadConfig): THREE.Group {
   const group = createHandleBody(threadConfig);

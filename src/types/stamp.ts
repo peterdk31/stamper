@@ -105,6 +105,8 @@ export type ProjectImage =
 /** A saved project — see `lib/project.ts`. */
 export interface StampProject {
   version: number;
+  /** Shown in the header and used for the downloaded file names; empty = derived from the image and texts. */
+  name: string;
   settings: StampSettings;
   image: ProjectImage | null;
   texts: StampText[];
